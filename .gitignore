@@ -1,0 +1,14 @@
+# Python 관련 쓰레기 파일
+__pycache__/
+*.pyc
+
+# 가상환경 (용량만 차지하고 재현 가능하므로 제외)
+.venv/
+venv/
+
+# 환경 변수 (보안상 절대 업로드 금지)
+.env
+
+# OS 설정 파일
+.DS_Store
+Thumbs.db
