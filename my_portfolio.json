@@ -1,0 +1,14 @@
+[
+    {
+        "name": "삼성전자",
+        "ticker": "005930.KS",
+        "avg_price": 38555,
+        "quantity": 333.0
+    },
+    {
+        "name": "삼성 은 선물 ETN(H)",
+        "ticker": "530089.KS",
+        "avg_price": 40000,
+        "quantity": 3000.0
+    }
+]

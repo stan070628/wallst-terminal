@@ -1,146 +1,95 @@
 import streamlit as st
 import pandas as pd
-from engine import analyze_stock
+from portfolio_manager import load_portfolio, save_portfolio
+# engine.py에서 정의된 정확한 함수명을 가져옵니다.
+from engine import analyze_stock 
 
 def run_portfolio_tab(stock_dict):
-    # 🎯 [신규 기능] 타이틀과 새로고침 버튼을 최상단에 나란히 배치
-    col_title, col_refresh = st.columns([4, 1])
-    with col_title:
-        st.subheader("💼 내 계좌 정밀 진단 (The Closer's Portfolio)")
-    with col_refresh:
-        st.write("") # 버튼 높이 정렬용
-        if st.button("🔄 실시간 데이터 강제 동기화", use_container_width=True):
-            st.toast("📡 월스트리트 최신 데이터를 긁어옵니다...", icon="🔥")
-            st.rerun() # 엔진 강제 재가동
-            
-    st.markdown("---")
-    
-    # 세션 스테이트 초기화
-    if 'portfolio' not in st.session_state:
-        st.session_state.portfolio = []
+    st.header("📊 내 계좌 정밀 진단")
+    st.write("---")
 
-    # 1. 다중 입력부 (소수점 입력 완벽 지원)
-    with st.expander("➕ 내 보유 종목 일괄 장전 (미장/코인 소수점 지원)", expanded=True):
-        st.write("미장 및 암호화폐의 소수점 매매(예: 0.15주)까지 지원합니다. 빈칸을 채우고 **[일괄 장전]**을 누르십시오.")
+    if 'my_stocks' not in st.session_state:
+        st.session_state.my_stocks = load_portfolio()
 
-        if 'input_df' not in st.session_state:
-            st.session_state.input_df = pd.DataFrame(
-                [{"종목명": "", "매수평단가": 0.0, "보유수량": 0.0} for _ in range(3)]
-            )
+    # [1] 종목 추가 UI (기존 로직 유지)
+    with st.expander("➕ 내 종목 추가하기", expanded=True):
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col1:
+            selected_name = st.selectbox("분석할 종목 선택", list(stock_dict.keys()))
+        with col2:
+            avg_price = st.number_input("매수 평단가 (원)", min_value=0, value=0, step=100)
+        with col3:
+            quantity = st.number_input("보유 수량", min_value=0.0, value=0.0, step=1.0)
 
-        # 데이터 에디터
-        edited_df = st.data_editor(
-            st.session_state.input_df,
-            num_rows="dynamic",
-            column_config={
-                "종목명": st.column_config.SelectboxColumn(
-                    "종목명 (클릭하여 선택)", options=[""] + list(stock_dict.keys()), required=True
-                ),
-                "매수평단가": st.column_config.NumberColumn("매수 평단가 (원/$)", min_value=0.0, format="%.2f"),
-                "보유수량": st.column_config.NumberColumn("보유 수량", min_value=0.0000, step=0.01, format="%.4f")
-            },
-            use_container_width=True,
-            key="portfolio_editor"
-        )
-
-        if st.button("🔥 포트폴리오 일괄 장전"):
-            added_count = 0
-            for index, row in edited_df.iterrows():
-                name = row["종목명"]
-                price = row["매수평단가"]
-                qty = row["보유수량"]
-
-                if pd.isna(name) or name == "" or price <= 0 or qty <= 0:
-                    continue
-
-                if any(item['name'] == name for item in st.session_state.portfolio):
-                    st.warning(f"⚠️ {name}은(는) 이미 장전되어 있습니다. 하단에서 삭제 후 다시 등록하십시오.")
-                    continue
-
-                st.session_state.portfolio.append({
-                    'name': name,
-                    'ticker': stock_dict[name],
-                    'avg_price': float(price),
-                    'qty': float(qty)
-                })
-                added_count += 1
-
-            if added_count > 0:
-                st.success(f"✅ {added_count}개 종목 장전 완료!")
-                st.session_state.input_df = pd.DataFrame([{"종목명": "", "매수평단가": 0.0, "보유수량": 0.0} for _ in range(3)])
+        if st.button("🚀 종목 등록 및 영구 저장", use_container_width=True):
+            if quantity > 0:
+                new_item = {
+                    "name": selected_name,
+                    "ticker": stock_dict[selected_name],
+                    "avg_price": avg_price,
+                    "quantity": quantity
+                }
+                st.session_state.my_stocks.append(new_item)
+                save_portfolio(st.session_state.my_stocks)
+                st.success(f"✅ {selected_name} 등록 완료!")
                 st.rerun()
-            else:
-                st.error("새로 장전할 유효한 종목이 없습니다. 종목명, 평단가, 수량을 정확히 입력하십시오.")
 
-    # 2. 실시간 계좌 현황 및 9대 지표 정밀 진단
-    st.write("### 📊 실시간 계좌 현황 및 9대 지표 정밀 진단")
-    
-    if not st.session_state.portfolio:
-        st.info("현재 장전된 종목이 없습니다. 위 표에서 종목을 입력하고 장전하십시오.")
-        return
+    # [2] 현재 내 포트폴리오 리스트
+    st.subheader("📂 현재 내 포트폴리오")
+    if not st.session_state.my_stocks:
+        st.info("등록된 종목이 없습니다.")
+    else:
+        for idx, stock in enumerate(reversed(st.session_state.my_stocks)):
+            actual_idx = len(st.session_state.my_stocks) - 1 - idx
+            with st.container(border=True):
+                c1, c2, c3, c4 = st.columns([1.5, 1, 1, 0.5])
+                with c1: st.write(f"**{stock['name']}**"); st.caption(f"티커: {stock['ticker']}")
+                with c2: st.write(f"평단: {stock['avg_price']:,}원")
+                with c3: st.write(f"수량: {stock['quantity']:,}주")
+                with c4:
+                    if st.button("🗑️", key=f"del_{actual_idx}"):
+                        st.session_state.my_stocks.pop(actual_idx); save_portfolio(st.session_state.my_stocks); st.rerun()
 
-    for idx, item in enumerate(st.session_state.portfolio):
-        name = item['name']
-        ticker = item['ticker']
-        avg_p = item['avg_price']
-        qty = item['qty']
-
-        with st.container():
-            st.markdown(f"#### 🎯 {name} (나의 평단가: {avg_p:,.2f} / 수량: {qty:,.4f})")
-            
-            with st.spinner(f"{name} 실시간 엔진 구동 중..."):
-                result = analyze_stock(ticker)
-                
-            if result and len(result) == 5 and result[0] is not None:
-                df, score, core_msg, analysis, stop_loss_price = result
-                current_price = df.iloc[-1]['Close']
-                currency = "$" if ".KS" not in ticker and ".KQ" not in ticker else "₩"
-                
-                # 수익률 및 평가금액 자동 계산
-                return_rate = ((current_price - avg_p) / avg_p) * 100
-                total_value = current_price * qty
-                profit_loss = (current_price - avg_p) * qty
-                
-                c1, c2, c3, c4, c5 = st.columns(5)
-                c1.metric("현재가", f"{currency}{current_price:,.2f}")
-                c2.metric("나의 평단가", f"{currency}{avg_p:,.2f}")
-                c3.metric("수익률", f"{return_rate:,.2f}%", delta=f"{return_rate:,.2f}%")
-                c4.metric("평가 손익", f"{currency}{profit_loss:,.2f}", delta=f"{profit_loss:,.2f}")
-                c5.metric("총 평가금액", f"{currency}{total_value:,.2f}")
-
-                st.markdown("---")
-
-                col_action, col_deepdive = st.columns([1, 1.5])
-                
-                with col_action:
-                    st.write("##### ⚡ The Closer's Action Plan")
-                    if return_rate < 0:
-                        if current_price < stop_loss_price:
-                            st.error(f"🚨 [기계적 손절 발동] 현재 {return_rate:,.2f}% 손실. 기계적 손절가({stop_loss_price:,.2f}) 붕괴. 즉시 전량 매도하여 계좌를 지키십시오.")
-                        elif score >= 65:
-                            st.info(f"⚖️ [기회의 물타기] 손실 중이나 9대 지표({score}점)가 매수를 외칩니다. 평단가를 낮출 강력한 기회입니다.")
-                        else:
-                            st.warning(f"⏳ [관망] 손실 중이나 손절가 방어 중. 추가 매수 없이 대기하십시오.")
+        # [3] 통합 스캔 로직 (engine.py 연동 완료)
+        st.write("---")
+        if st.button("🔍 전체 포트폴리오 9대 지표 통합 스캔 시작", type="primary", use_container_width=True):
+            with st.status("🚀 전 종목 정밀 분석 중...", expanded=True) as status:
+                results_data = []
+                for stock in st.session_state.my_stocks:
+                    st.write(f"🔎 {stock['name']} 분석 중...")
+                    
+                    # engine.py의 analyze_stock 함수 호출
+                    # 반환값: data(df), score(float), core_msg(str), analysis(list), stop_loss_price(float)
+                    res_df, score, signal, analysis_list, stop_loss = analyze_stock(stock['ticker'])
+                    
+                    if res_df is not None and not res_df.empty:
+                        # 현재가 추출 (데이터프레임의 마지막 종가)
+                        current_price = int(res_df.iloc[-1]['Close'])
+                        # 수익률 계산
+                        profit_pct = ((current_price - stock['avg_price']) / stock['avg_price'] * 100) if stock['avg_price'] > 0 else 0
+                        
+                        results_data.append({
+                            "종목명": stock['name'],
+                            "현재가": f"{current_price:,}원",
+                            "수익률": f"{profit_pct:+.2f}%",
+                            "AI 점수": f"{score}점",
+                            "투자의견": signal,
+                            "수학적 손절가": f"{int(stop_loss):,}원"
+                        })
                     else:
-                        if score < 40:
-                            st.success(f"💰 [전량 익절 권장] {return_rate:,.2f}% 수익! 지표가 무너지고 있습니다({score}점). 꼭지에서 팔 생각 말고 당장 수익 확정하십시오.")
-                        elif df.iloc[-1]['rsi'] > 75:
-                            st.warning(f"🔥 [부분 익절] 강력한 수익 구간이나 단기 과열(RSI 75 초과) 상태입니다. 절반 익절 후 나머지만 들고 가십시오.")
-                        else:
-                            st.success(f"🚀 [강력 홀딩] 완벽한 추세 탑승! 아직 매도 신호가 없으니 랠리를 끝까지 쥐어짜십시오.")
-                            
-                    st.metric("기계적 손절가 (ATR 기반)", f"{currency}{stop_loss_price:,.2f}")
-
-                with col_deepdive:
-                    st.write("##### 🧐 9대 지표 심층 분석 리포트")
-                    for line in analysis:
-                        st.write(line)
-
-                _, del_col = st.columns([8, 1])
-                with del_col:
-                    if st.button(f"🗑️ 삭제", key=f"del_{idx}"):
-                        st.session_state.portfolio.pop(idx)
-                        st.rerun()
-            else:
-                st.error(f"❌ {name} 실시간 데이터를 불러오지 못했습니다.")
-        st.markdown("<br><br>", unsafe_allow_html=True)
+                        results_data.append({
+                            "종목명": stock['name'],
+                            "현재가": "N/A", "수익률": "N/A", "AI 점수": "0점",
+                            "투자의견": "데이터 오류", "수학적 손절가": "N/A"
+                        })
+                status.update(label="✅ 분석 완료!", state="complete", expanded=False)
+            
+            # 분석 결과 표 출력
+            st.subheader("📋 통합 진단 결과 리포트")
+            if results_data:
+                df_res = pd.DataFrame(results_data)
+                # 인덱스 없이 깔끔하게 표로 출력
+                st.dataframe(df_res, use_container_width=True, hide_index=True)
+                
+                # 추가 조언 (ENTP 스탠을 위한 핵심 요약)
+                st.info("💡 **Closer's Tip:** '적극 매수' 신호가 뜬 종목 중 수익률이 마이너스라면 물타기 적기이며, '탈출' 신호가 뜬 종목은 손절가를 반드시 준수하십시오.")

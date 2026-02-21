@@ -25,6 +25,10 @@ def analyze_stock(ticker):
             return None, 0, "데이터 부족", [], 0
             
         data = data.ffill().dropna()
+        # [신규: 데이터 방어막] 전일 대비 가격이 50% 이상 급변하면 데이터 오염으로 간주
+        data['price_change'] = data['Close'].pct_change().abs()
+        if (data['price_change'].iloc[-1] > 0.5): # 50% 이상 급변 시
+             return None, 0, "⚠️ 데이터 신뢰도 이상: 급격한 가격 변동 탐지 (액면분할 또는 API 오류 가능성)", [], 0
 
         # 2. 기술적 지표 계산
         data['ma60'] = data['Close'].rolling(window=60).mean()
