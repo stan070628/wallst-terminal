@@ -5,3 +5,5 @@ yfinance
 FinanceDataReader
 ta
 plotly
+lxml
+requests
