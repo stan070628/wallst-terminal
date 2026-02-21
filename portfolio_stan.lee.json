@@ -1,1 +1,14 @@
-[]
+[
+    {
+        "name": "애플",
+        "ticker": "AAPL",
+        "avg_price": 1111,
+        "quantity": 111
+    },
+    {
+        "name": "삼성전자",
+        "ticker": "005930.KS",
+        "avg_price": 333.0,
+        "quantity": 333.0
+    }
+]
