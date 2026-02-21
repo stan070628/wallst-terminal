@@ -1,135 +1,200 @@
 import streamlit as st
 import plotly.graph_objects as go
 from engine import analyze_stock
-from market_data import get_all_krx_stocks  # [수술] 전 종목 엔진 로드
+from market_data import get_all_krx_stocks
 from style_utils import apply_global_style
 
 def run_scanner_tab(unused_stock_dict):
-    apply_global_style() # 전역 가독성 패치 적용
-    st.markdown("<h1 style='font-weight:800;'>🔍 전문가 종목 정밀 진단</h1>", unsafe_allow_html=True)
+    apply_global_style()
     
-    # 1. 조회 모드 분리 (국내 vs 글로벌)
-    search_mode = st.radio("진단 시장 선택", ["🇰🇷 국내 주식 (KOSPI/KOSDAQ)", "🌎 글로벌 자산 (US/Crypto)"], horizontal=True)
+    # 고급 스타일링
+    st.markdown("""
+    <style>
+        .score-badge-excellent { background-color: #ff3b30; padding: 4px 10px; border-radius: 6px; color: white; font-weight: bold; font-size: 1.1rem; }
+        .score-badge-good { background-color: #ff9500; padding: 4px 10px; border-radius: 6px; color: white; font-weight: bold; font-size: 1.1rem; }
+        .score-badge-neutral { background-color: #5ac8fa; padding: 4px 10px; border-radius: 6px; color: white; font-weight: bold; font-size: 1.1rem; }
+        .score-badge-poor { background-color: #4cd964; padding: 4px 10px; border-radius: 6px; color: white; font-weight: bold; font-size: 1.1rem; }
+        .metric-card { text-align: center; padding: 18px; background: linear-gradient(135deg, #1a1a1a 0%, #262626 100%); border-radius: 10px; border: 1px solid #333; box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
+        .metric-label { color: #888; font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .metric-value { color: white; font-size: 2rem; font-weight: 800; }
+        .section-title { border-bottom: 3px solid #ff9500; padding-bottom: 10px; margin-top: 25px; margin-bottom: 15px; }
+        .status-good { background-color: rgba(76, 217, 100, 0.1); border-left: 4px solid #4cd964; padding: 15px; border-radius: 8px; }
+        .status-warning { background-color: rgba(255, 149, 0, 0.1); border-left: 4px solid #ff9500; padding: 15px; border-radius: 8px; }
+        .status-danger { background-color: rgba(255, 59, 48, 0.1); border-left: 4px solid #ff3b30; padding: 15px; border-radius: 8px; }
+    </style>
+    """, unsafe_allow_html=True)
     
-    target_ticker = None
-    target_name = ""
-
-    # 2. 시장별 전용 입력 시스템
-    if search_mode == "🇰🇷 국내 주식 (KOSPI/KOSDAQ)":
-        all_stocks = get_all_krx_stocks() # 삼천당제약 포함 전 종목 리스트
-        col_kr, _ = st.columns([2, 1])
-        with col_kr:
-            target_name = st.selectbox("진단할 국내 종목 검색", list(all_stocks.keys()), index=0)
-            target_ticker = all_stocks[target_name]
-        btn_label = f"🔬 {target_name} 정밀 분석 가동"
+    # 헤더
+    col_header = st.columns([1])[0]
+    st.markdown("## 🔍 전문가 종목 정밀 진단", unsafe_allow_html=False)
+    st.caption("**The Closer's AI 분석엔진** — 9대 기술지표 통합 진단 (가격·수급·시장심리·자금흐름)")
+    
+    st.markdown("---")
+    
+    # 입력 섹션
+    col_input1, col_input2 = st.columns([2, 1.2])
+    
+    with col_input1:
+        search_mode = st.radio("📊 분석 시장 선택", ["🇰🇷 국내 주식", "🌎 글로벌 자산"], horizontal=True, label_visibility="collapsed")
+    
+    if search_mode == "🇰🇷 국내 주식":
+        all_stocks = get_all_krx_stocks()
+        target_name = st.selectbox("📌 종목 검색", list(all_stocks.keys()), key="krx_select")
+        target_ticker = all_stocks[target_name]
     else:
-        col_gl, _ = st.columns([2, 1])
-        with col_gl:
-            target_ticker = st.text_input("글로벌 티커 직접 입력", placeholder="예: TSLA, NVDA, BTC-USD").strip().upper()
-            target_name = target_ticker
-        btn_label = f"🚀 {target_ticker if target_ticker else 'Global'} 자산 분석 가동"
+        target_ticker = st.text_input("💱 글로벌 티커 입력", value="AAPL", placeholder="AAPL, TSLA, BTC-USD").strip().upper()
+        target_name = target_ticker
 
-    st.write("---")
-
-    # 3. 분석 집행
-    if st.button(btn_label, type="primary", use_container_width=True):
-        if not target_ticker:
-            st.warning("분석할 티커를 입력하거나 선택하십시오.")
-            return
-
+    with col_input2:
+        pass
+    
+    # 분석 버튼
+    col_btn = st.columns([1])[0]
+    btn_analyze = st.button(f"🚀 {target_name} 분석 시작", type="primary", use_container_width=True, help="9대 지표 통합 분석 시작 (5-10초)")
+    
+    if btn_analyze:
+        # 로딩 애니메이션
+        progress_placeholder = st.empty()
+        progress_placeholder.info("🔄 분석 중... 데이터 수집 → 지표 계산 → 신호 생성")
+        
         df, score, msg, details, stop_loss = analyze_stock(target_ticker)
+        progress_placeholder.empty()
         
         if df is not None:
-            # 최상단 점수 리포트 출력
-            st.markdown(f"#### {target_name} AI 신뢰 점수: <span style='color:white; font-size:3.2rem; font-weight:800;'>{score}점</span>", unsafe_allow_html=True)
-            st.markdown(f"### **{msg}**")
-            st.error(f"📍 최종 방어선 (손절가): {int(stop_loss):,}원")
-            st.write("---")
-
-            # 4. [수술] 전문가 의견 고도화 (VWAP, 일목, RSI 용어 정리)
+            # 신뢰도 레벨 결정
+            if score >= 75:
+                score_badge = f"<span class='score-badge-excellent'>{score}점 🔥</span>"
+                level_color = "🔴"
+                status_class = "status-danger"
+            elif score >= 55:
+                score_badge = f"<span class='score-badge-good'>{score}점 ⚖️</span>"
+                level_color = "🟡"
+                status_class = "status-warning"
+            elif score >= 40:
+                score_badge = f"<span class='score-badge-neutral'>{score}점 ❄️</span>"
+                level_color = "🔵"
+                status_class = "status-warning"
+            else:
+                score_badge = f"<span class='score-badge-poor'>{score}점 ⛔</span>"
+                level_color = "🟢"
+                status_class = "status-good"
+            
+            # 메트릭 대시보드
+            st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+            
+            m1, m2, m3, m4 = st.columns(4, gap="medium")
+            
+            with m1:
+                st.markdown(f"""<div class='metric-card'>
+                <div class='metric-label'>🎯 AI 신뢰도</div>
+                <div class='metric-value'>{score_badge}</div>
+                </div>""", unsafe_allow_html=True)
+            
+            with m2:
+                current_price = int(df['Close'].iloc[-1]) if df['Close'].iloc[-1] > 100 else round(df['Close'].iloc[-1], 2)
+                st.markdown(f"""<div class='metric-card'>
+                <div class='metric-label'>💹 현재가</div>
+                <div class='metric-value' style='font-size: 1.8rem;'>{current_price:,}</div>
+                </div>""", unsafe_allow_html=True)
+            
+            with m3:
+                stop_loss_val = int(stop_loss) if stop_loss > 100 else round(stop_loss, 2)
+                st.markdown(f"""<div class='metric-card'>
+                <div class='metric-label'>🛑 손절가</div>
+                <div class='metric-value' style='color: #ff3b30; font-size: 1.8rem;'>{stop_loss_val:,}</div>
+                </div>""", unsafe_allow_html=True)
+            
+            with m4:
+                st.markdown(f"""<div class='metric-card'>
+                <div class='metric-label'>⚡ 판정</div>
+                <div class='metric-value' style='font-size: 2.5rem;'>{level_color}</div>
+                </div>""", unsafe_allow_html=True)
+            
+            # AI 판정
+            st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='{status_class}'><b>🤖 The Closer's 최종 판정:</b> {msg}</div>", unsafe_allow_html=True)
+            
+            st.markdown(f"---")
+            st.markdown(f"**📊 엔진 판정:** {msg}")
+            
+            # 나머지 분석 결과...
             for item in details:
-                col_txt, col_chart = st.columns([1, 1.8])
-                
-                # 지표명 및 의견 재설정 (전문가 용어 이식)
-                title = item['title']
-                view_text = item['full_comment']
-                
-                if "VWAP" in title:
-                    title = "⚖️ 세력의 진짜 평단가 (VWAP)"
-                    # [요청 반영] 그래프 의미 전달형 코멘트
-                    if "위에" in view_text:
-                        view_text = f"{item['res']} 이 의미는 현재 가격이 세력의 매수 원가보다 높다는 거야. 세력이 자기 수익을 지키기 위해 이 라인을 강력한 **'지지선'**으로 만들 가능성이 90% 이상이야."
-                    else:
-                        view_text = f"{item['res']} 이 의미는 현재 가격이 세력의 평단가 아래에 있다는 뜻이야. 세력이 물량을 던지고 도망갔거나, 이 라인이 뚫기 힘든 **'무거운 천장'**이 되어 주가를 누를 거야."
-                
-                elif "일목균형표" in title:
-                    title = "☁️ 심리적 매물벽 (일목 구름대)"
-                    if "안착" in view_text:
-                        view_text = f"{item['res']} 이 의미는 주가가 모든 매물 저항을 뚫고 **'고속도로'**에 진입했다는 뜻이야. 가로막는 매물벽이 없으니 추세가 가파르게 상승할 수 있는 최적의 상태지."
-                    else:
-                        view_text = f"{item['res']} 이 의미는 주가 위쪽에 탈출하지 못한 매물들이 **'산더미'**처럼 쌓여있다는 뜻이야. 반등하려 해도 머리를 누르는 매물벽이 너무 두꺼워 상승이 제한적일 거야."
-                
-                elif "RSI" in title:
-                    title = "🌡️ 매수 강도 측정기 (RSI)"
-                    if "과열" in view_text:
-                        view_text = f"{item['res']} 시장의 매수 열기가 **'과도하게 뜨거운'** 상태라는 거야. 엔진이 식어야 하는 시점이 곧 올 거야. 이런 시점에 추격해서 사들어가는 건 피하는 게 현명할 거 같아. 조정이 올 확률이 높거든."
-                    else:
-                        view_text = f"{item['res']} 매수 강도가 **'적정'**하거나 혹은 아직 여유가 있다는 뜻이야. 엔진이 무리 없이 계속 가동될 수 있는 충분한 에너지가 남아있다는 신호지. 추세를 믿고 가져도 괜찮은 상태야."
-
-                with col_txt:
-                    st.markdown(f"### 📍 {title}")
-                    st.info(f"**전문가 분석:**\n\n{view_text}")
-                
-                with col_chart:
-                    fig = go.Figure()
-                    if "VWAP" in item['title'] or "일목균형표" in item['title']:
-                        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Price'))
-                        if "VWAP" in item['title']:
-                            fig.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='orange', width=2)))
-                        else:
-                            fig.add_trace(go.Scatter(x=df.index, y=df['ichi_a'], line=dict(width=0), name='A'))
-                            fig.add_trace(go.Scatter(x=df.index, y=df['ichi_b'], line=dict(width=0), fill='tonexty', fillcolor='rgba(255, 255, 255, 0.1)', name='B'))
-                    elif "RSI" in item['title']:
-                        fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], name='RSI', line=dict(color='yellow')))
-                        fig.add_hline(y=70, line_dash="dash", line_color="red")
-                        fig.add_hline(y=30, line_dash="dash", line_color="blue")
-                        fig.update_yaxes(range=[0, 100])
-
-                    fig.update_layout(height=350, margin=dict(l=0,r=0,t=50,b=0), xaxis_rangeslider_visible=False, template="plotly_dark", plot_bgcolor='black', paper_bgcolor='black', showlegend=False)
-                    st.plotly_chart(fig, use_container_width=True)
-                st.write("---")
-
-            # 5. MACD 신호 분석
-            st.markdown("### 📊 MACD로 보는 매수/매도 세력")
-            c_txt, c_chart = st.columns([1, 1.8])
-            
-            df['macd_hist'] = df['macd'] - df['macd_sig']
-            curr_hist = df['macd_hist'].iloc[-1]
-            limit = df['macd'].std() * 2 
-            
-            with c_txt:
-                with st.expander("📝 MACD 지표 읽는 법", expanded=True):
-                    st.write("⚪ **흰색 꺾은선**: 주가의 큰 방향을 보여주는 선 (위쪽은 사려는 사람들이 이기고 아래쪽은 팔려는 사람들이 이기고 있어)")
-                    st.write("🔴 **빨간 막대**: 사려는 사람들이 얼마나 강한지 보여줘 (길수록 매수세가 강함)")
-                    st.write("🔵 **파란 막대**: 팔려는 사람들이 얼마나 강한지 보여줘 (길수록 매도세가 강함)")
-                    st.write("░ **점선**: 정상 범위를 벗어난 과도한 신호의 경계선")
-                
-                if curr_hist >= limit:
-                    impact = "🔴 **매수세가 정점에 달했어요**: 사려는 사람들이 너무 많아져서 지금 상태가 이상적이지 않다는 거야. 여기서 계속 사들어가면 손해볼 가능성이 높으니 주의해야 해. 곧 가격이 조정받을 준비가 되어있다는 신호야."
-                elif curr_hist <= -limit:
-                    impact = "🔵 **매도세가 극단적으로 강해요**: 팔려는 사람들이 최대한 강하게 나가고 있다는 거야. 이런 상태는 오래가지 않아. 에너지가 다 떨어지면 매수세가 나타나서 가격이 올라갈 가능성이 정말 높거든. 만약 여기서 샀다면 조금만 더 참아봐."
-                else:
-                    impact = "⚪ **정상적인 상태예요**: 지금은 사려는 사람과 팔려는 사람의 힘이 균형을 이루고 있는 거야. 과도한 신호 없이 자연스럽게 움직이고 있으니 추세를 믿고 가져도 돼."
-                
-                st.info(f"**전문가 의견:**\n\n{impact}")
-
-            with c_chart:
-                fig_macd = go.Figure()
-                fig_macd.add_trace(go.Bar(x=df.index, y=df['macd_hist'], marker_color=['#ff3b30' if x > 0 else '#007aff' for x in df['macd_hist']]))
-                fig_macd.add_trace(go.Scatter(x=df.index, y=df['macd'], line=dict(color='white')))
-                fig_macd.add_hline(y=limit, line_dash="dot", line_color="red")
-                fig_macd.add_hline(y=-limit, line_dash="dot", line_color="blue")
-                fig_macd.update_layout(height=400, margin=dict(l=0,r=0,t=50,b=0), template="plotly_dark", showlegend=False)
-                st.plotly_chart(fig_macd, use_container_width=True)
+                st.write(f"**{item['title']}**")
+                st.caption(item['full_comment'])
         else:
-            st.error(f"❌ '{target_name}' 데이터를 불러올 수 없습니다. 티커를 확인하십시오.")
+            st.error(f"❌ '{target_name}' 분석 실패\n데이터를 확인하고 다시 시도해주세요.")
+        
+        if df is not None:
+            # 상단 핵심 배너
+            st.markdown(f"#### {target_name} AI 신뢰 점수: <span style='color:white; font-size:3.2rem; font-weight:800;'>{score}점</span>", unsafe_allow_html=True)
+            st.error(f"📍 최종 방어선 (손절가): {stop_loss:,.2f} (ATR 기반)")
+            st.info(f"**The Closer's 판정:** {msg}")
+
+            # 헬퍼 함수: 엔진의 코멘트를 UI 키워드와 매칭
+            def get_realtime_view(keywords):
+                for d in details:
+                    if any(k in d['title'] for k in keywords): return d['full_comment']
+                return "엔진에서 해당 지표의 실시간 데이터를 판독 중입니다."
+
+            # --- [SET 1] 가격/수급/매물 (Indicator 1,2,3,4) ---
+            st.write("---")
+            st.markdown("### 📊 SET 1. 가격 흐름과 세력의 에너지 (Price, VWAP, 구름, MACD)")
+            c1, c2 = st.columns([1, 1.8])
+            with c1:
+                st.info(f"""
+                **💡 지표 이해:** VWAP은 세력 평단가, 구름대는 매물 저항입니다.
+                **🎯 실시간 판독:**
+                * **세력 수급**: {get_realtime_view(['VWAP', '평단가'])}
+                * **매물 저항**: {get_realtime_view(['구름', '일목'])}
+                """)
+            with c2:
+                fig1 = go.Figure()
+                fig1.add_trace(go.Scatter(x=df.index, y=df['ichi_a'], line=dict(width=0), showlegend=False))
+                fig1.add_trace(go.Scatter(x=df.index, y=df['ichi_b'], fill='tonexty', fillcolor='rgba(128, 128, 128, 0.2)', line=dict(width=0), name='구름대'))
+                fig1.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='주가'))
+                fig1.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='orange', width=2)))
+                # MACD 분포 Overlay
+                m_h = df['macd'] - df['macd_sig']
+                fig1.add_trace(go.Bar(x=df.index, y=m_h, marker_color=['rgba(255, 59, 48, 0.3)' if x > 0 else 'rgba(0, 122, 255, 0.3)' for x in m_h], yaxis='y2', name='MACD에너지'))
+                fig1.update_layout(height=450, template="plotly_dark", xaxis_rangeslider_visible=False, showlegend=False,
+                                  yaxis2=dict(overlaying='y', side='right', showgrid=False, range=[-max(abs(m_h))*4, max(abs(m_h))*4]))
+                st.plotly_chart(fig1, use_container_width=True)
+
+            # --- [SET 2] 시장 온도 (Indicator 5,6) ---
+            st.write("---")
+            st.markdown("### 🌡️ SET 2. 시장의 과열도 및 심리 (RSI, MFI)")
+            c3, c4 = st.columns([1, 1.8])
+            with c3:
+                st.info(f"""
+                **💡 지표 이해:** RSI와 MFI는 시장의 체온입니다.
+                **🎯 실시간 판독:**
+                * **엔진 온도**: {get_realtime_view(['RSI', '온도'])}
+                """)
+            with c4:
+                fig2 = go.Figure()
+                fig2.add_trace(go.Scatter(x=df.index, y=df['rsi'], name='RSI', line=dict(color='yellow')))
+                fig2.add_trace(go.Scatter(x=df.index, y=df['mfi'], name='MFI', line=dict(color='lime', dash='dot')))
+                fig2.add_hline(y=70, line_dash="dash", line_color="red"); fig2.add_hline(y=30, line_dash="dash", line_color="blue")
+                fig2.update_layout(height=300, template="plotly_dark")
+                st.plotly_chart(fig2, use_container_width=True)
+
+            # --- [SET 3] 자금 흐름 (Indicator 7,8) ---
+            st.write("---")
+            st.markdown("### 💰 SET 3. 거래량과 자금 매집 흔적 (OBV, Volume)")
+            c5, c6 = st.columns([1, 1.8])
+            with c5:
+                obv_status = "매집 중" if df['obv'].iloc[-1] > df['obv'].iloc[-5] else "이탈 중"
+                st.info(f"""
+                **💡 지표 이해:** OBV는 거래량의 누적 에너지를 보여줍니다.
+                **🎯 실시간 판독:**
+                * **자금 유출입**: 현재 {target_name}의 큰손들은 자금을 **{obv_status}**인 것으로 분석됩니다.
+                """)
+            with c6:
+                fig3 = go.Figure()
+                fig3.add_trace(go.Scatter(x=df.index, y=df['obv'], name='OBV', line=dict(color='cyan')))
+                fig3.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color='gray', opacity=0.3, yaxis='y2', name='Volume'))
+                fig3.update_layout(height=300, template="plotly_dark", yaxis2=dict(overlaying='y', side='right', showgrid=False), showlegend=False)
+                st.plotly_chart(fig3, use_container_width=True)
+
+        else:
+            st.error("❌ 데이터 로드 실패: 티커 형식을 확인하십시오.")

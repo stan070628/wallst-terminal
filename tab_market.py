@@ -1,113 +1,60 @@
 import streamlit as st
 import pandas as pd
 from engine import analyze_stock
+from market_data import get_categorized_stocks  # [수정] 동적 리스트 엔진 로드
 from style_utils import apply_global_style
 
-def run_market_tab(stock_dict):
+def run_market_tab(unused_stock_dict):
     apply_global_style()
-    st.markdown("<h1 style='color:white; font-weight:800;'>🔥 시장 전수조사</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='color:white; font-weight:800;'>🔥 시장 전수조사 (Top 200 Sweep)</h1>", unsafe_allow_html=True)
     
-    # 시장 선택 (버튼 키 충돌 해결)
+    # [수정] 동적 시장 카테고리 로드 (모수 200개 확장)
+    categories = get_categorized_stocks()
+    
     col1, col2, col3 = st.columns(3)
-    with col1:
-        kospi_btn = st.button("🇰🇷 KOSPI 전수조사", use_container_width=True, key="btn_kospi")
-    with col2:
-        kosdaq_btn = st.button("🇰🇷 KOSDAQ 전수조사", use_container_width=True, key="btn_kosdaq")
-    with col3:
-        global_btn = st.button("🇺🇸 GLOBAL 전수조사", use_container_width=True, key="btn_global")
-    
-    target = None
-    if kospi_btn:
-        target = ".KS"
-    elif kosdaq_btn:
-        target = ".KQ"
-    elif global_btn:
-        target = "GLOBAL"
+    market_key = None
+    if col1.button("🇰🇷 KOSPI 200", use_container_width=True, key="m_kospi"): market_key = "KOSPI 200"
+    if col2.button("🇰🇷 KOSDAQ 200", use_container_width=True, key="m_kosdaq"): market_key = "KOSDAQ 200"
+    if col3.button("🇺🇸 GLOBAL", use_container_width=True, key="m_global"): market_key = "GLOBAL"
 
-    if target:
-        # 필터링 로직 개선 (명확하게)
-        if target == "GLOBAL":
-            stocks_to_scan = [k for k, v in stock_dict.items() if ".K" not in v]
-        else:
-            stocks_to_scan = [k for k, v in stock_dict.items() if target in v]
-        
-        # 사용자 맞춤 필터 옵션
-        st.write("---")
-        col_filter1, col_filter2, col_filter3 = st.columns(3)
-        with col_filter1:
-            min_score = st.slider("최소 신뢰도 점수", 0, 100, 70, key="min_score")
-        with col_filter2:
-            sort_by = st.selectbox("정렬 기준", ["점수 (높음순)", "점수 (낮음순)", "가격 (높음순)", "가격 (낮음순)"], key="sort_by")
-        with col_filter3:
-            max_results = st.slider("최대 표시 개수", 5, 100, 50, key="max_results")
+    if market_key:
+        stocks_to_scan = categories[market_key]
         
         st.write("---")
+        col_f1, col_f2 = st.columns(2)
+        with col_f1: min_score = st.slider("최소 신뢰도 점수 (현재 시장 약세 시 45~50점 추천)", 0, 100, 50)
+        with col_f2: max_results = st.slider("최대 표시 개수", 5, 50, 20)
         
         results = []
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        # 분석 실행
-        for i, name in enumerate(stocks_to_scan):
-            try:
-                ticker = stock_dict[name]
-                status_text.text(f"🔎 {name} 정밀 판독 중... ({i+1}/{len(stocks_to_scan)})")
-                
-                df, score, signal, _, _ = analyze_stock(ticker)
-                
-                # 데이터 로드 성공 여부 확인
-                if df is not None and score is not None:
-                    curr_price = df['Close'].iloc[-1]
-                    prev_price = df['Close'].iloc[-2] if len(df) > 1 else curr_price
-                    change_rate = ((curr_price - prev_price) / prev_price * 100) if prev_price != 0 else 0
-                    
-                    if score >= min_score:
-                        results.append({
-                            "종목명": name,
-                            "신뢰도": f"{int(score)}점",
-                            "평가": signal,
-                            "현재가": f"{int(curr_price):,}원",
-                            "변화율": f"{change_rate:+.2f}%",
-                            "거래량": f"{int(df['Volume'].iloc[-1]/(1e6)):,.0f}M"
-                        })
-            except Exception as e:
-                # 개별 종목 분석 실패 시 계속 진행
-                continue
+        for i, (name, ticker) in enumerate(stocks_to_scan.items()):
+            status_text.text(f"🔎 {name} 분석 중... ({i+1}/{len(stocks_to_scan)})")
+            # [수정] 현재가 추출 로직 개선 및 엔진 호환
+            df, score, signal, _, _ = analyze_stock(ticker)
             
+            if df is not None and score >= min_score:
+                curr_price = df['Close'].iloc[-1]
+                results.append({
+                    "종목명": name,
+                    "티커": ticker,
+                    "신뢰도": score,
+                    "평가": signal,
+                    "현재가": f"{int(curr_price):,}원" if ".K" in ticker else f"${curr_price:.2f}"
+                })
             progress_bar.progress((i + 1) / len(stocks_to_scan))
         
         status_text.empty()
-        progress_bar.empty()
-        
-        # 결과 정렬
         if results:
-            if sort_by == "점수 (높음순)":
-                results = sorted(results, key=lambda x: int(x['신뢰도'].replace('점', '')), reverse=True)
-            elif sort_by == "점수 (낮음순)":
-                results = sorted(results, key=lambda x: int(x['신뢰도'].replace('점', '')))
-            elif sort_by == "가격 (높음순)":
-                results = sorted(results, key=lambda x: int(x['현재가'].replace('원', '').replace(',', '')), reverse=True)
-            elif sort_by == "가격 (낮음순)":
-                results = sorted(results, key=lambda x: int(x['현재가'].replace('원', '').replace(',', '')))
-            
-            # 최대 개수로 제한
-            results = results[:max_results]
-            
-            st.success(f"✅ 조건에 부합하는 유망 종목 {len(results)}개 발굴 완료!")
-            
-            # 데이터프레임 표시
-            df_results = pd.DataFrame(results)
-            st.dataframe(df_results, use_container_width=True, hide_index=True)
-            
-            # 추가 정보: 시장 요약
-            st.write("---")
-            col_summary1, col_summary2, col_summary3 = st.columns(3)
-            with col_summary1:
-                st.metric("조사 대상 종목", len(stocks_to_scan))
-            with col_summary2:
-                st.metric("조건 부합 종목", len(results), f"({min_score}점 이상)")
-            with col_summary3:
-                success_rate = (len(results) / len(stocks_to_scan) * 100) if stocks_to_scan else 0
-                st.metric("성공률", f"{success_rate:.1f}%")
+            # 점수 높은 순 정렬 및 절삭
+            df_res = pd.DataFrame(results).sort_values(by="신뢰도", ascending=False).head(max_results)
+            st.success(f"✅ {market_key} 시장 유망 종목 {len(df_res)}개 발굴!")
+            st.dataframe(df_res, use_container_width=True, hide_index=True)
+            st.balloons()
         else:
-            st.warning(f"⚠️ 신뢰도 {min_score}점 이상인 유망 종목이 없습니다. 기준을 낮춰보세요.")
+            st.warning(f"⚠️ 현재 {min_score}점 이상인 종목이 없습니다. 점수 문턱을 낮추거나 시장을 변경해 보세요.")
+            # [The Closer's Tip] 만약 검색 결과가 0개라면?
+            if st.button("🔄 민감도 모드로 재조회 (45점 기준)", use_container_width=True):
+                min_score = 45 # 강제 조정 후 재실행 유도
+                st.rerun()

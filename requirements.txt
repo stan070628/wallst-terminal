@@ -1,25 +1,7 @@
-# ================================================================
-# AI Stock Analysis Bot - Requirements (Streamlit Cloud 호환)
-# Python 3.8 이상 필수
-# ================================================================
-
-# ---- UI 프레임워크 ----
-streamlit>=1.28.0
-
-# ---- 데이터 수집 & 처리 ----
-yfinance>=0.2.32
-pandas>=2.0.0
-numpy>=1.24.0
-
-# ---- 시각화 ----
-plotly>=5.17.0
-matplotlib>=3.7.0
-
-# ---- 기술 지표 분석 (pandas-ta: 순수 Python, Streamlit Cloud에서 안정적)
-pandas-ta>=0.3.14
-
-# ---- 환경 변수 & 설정 ----
-python-dotenv>=1.0.0
-
-# ---- HTTP 요청 ----
-requests>=2.31.0
+streamlit
+pandas
+numpy
+yfinance
+FinanceDataReader
+ta
+plotly
