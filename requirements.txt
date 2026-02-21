@@ -1,6 +1,6 @@
 streamlit
 pandas
 yfinance
-FinanceDataReader
+finance-datareader
 ta
 plotly
