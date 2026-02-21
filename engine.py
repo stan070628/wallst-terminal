@@ -1,45 +1,47 @@
 import yfinance as yf
-import FinanceDataReader as fdr
 import pandas as pd
+import pandas_ta as ta
 import numpy as np
 import streamlit as st
 from datetime import datetime, timedelta
-from ta.volume import MFIIndicator, OnBalanceVolumeIndicator, VolumeWeightedAveragePrice
-from ta.trend import MACD, IchimokuIndicator
-from ta.momentum import RSIIndicator
-from ta.volatility import AverageTrueRange, BollingerBands
 
 @st.cache_data(ttl=300)
 def analyze_stock(ticker):
     try:
-        # 1. [핵심 수정] 데이터 수집 및 1차원 강제 압축 (Shape 오류 해결)
-        if ticker.endswith('.KS') or ticker.endswith('.KQ'):
-            raw_ticker = ticker.split('.')[0]
-            data = fdr.DataReader(raw_ticker, start=(datetime.now() - timedelta(days=250)).strftime('%Y-%m-%d'))
-        else:
-            # yfinance 데이터 수집 시 Multi-index 컬럼 제거 및 1차원화
-            data = yf.download(ticker, period="150d", interval="1d", progress=False, auto_adjust=True)
-            if isinstance(data.columns, pd.MultiIndex):
-                data.columns = data.columns.get_level_values(0)
+        # 1. yfinance로 모든 데이터 통일 수집 (한국 주식: .KS/.KQ 티커 지원)
+        data = yf.download(ticker, period="150d", interval="1d", progress=False, auto_adjust=True)
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
         
         if data is None or data.empty or len(data) < 60: return None, 0, "데이터 부족", [], 0
         
-        # [수정] 모든 컬럼을 1차원 Series로 강제 변환하여 ta 라이브러리 오류 방지
+        # pandas-ta로 지표 계산
         data = data.ffill().dropna()
-        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-            if col in data.columns:
-                data[col] = data[col].squeeze() # 2D(150, 1) -> 1D(150,) 변환
-
-        # 9대 지표 계산
-        data['vwap'] = VolumeWeightedAveragePrice(high=data['High'], low=data['Low'], close=data['Close'], volume=data['Volume'], window=20).volume_weighted_average_price()
-        ichi = IchimokuIndicator(high=data['High'], low=data['Low'])
-        data['ichi_a'], data['ichi_b'] = ichi.ichimoku_a(), ichi.ichimoku_b()
-        macd_ind = MACD(close=data['Close'])
-        data['macd'], data['macd_sig'] = macd_ind.macd(), macd_ind.macd_signal()
-        data['rsi'] = RSIIndicator(close=data['Close']).rsi()
-        data['mfi'] = MFIIndicator(high=data['High'], low=data['Low'], close=data['Close'], volume=data['Volume']).money_flow_index()
-        data['obv'] = OnBalanceVolumeIndicator(close=data['Close'], volume=data['Volume']).on_balance_volume()
-        data['atr'] = AverageTrueRange(high=data['High'], low=data['Low'], close=data['Close']).average_true_range()
+        
+        # pandas-ta 라이브러리 적용
+        data.ta.vwap(high='High', low='Low', close='Close', volume='Volume', append=True)
+        data.ta.ichimoku(high='High', low='Low', append=True)
+        data.ta.macd(close='Close', append=True)
+        data.ta.rsi(close='Close', append=True)
+        data.ta.mfi(high='High', low='Low', close='Close', volume='Volume', append=True)
+        data.ta.obv(close='Close', volume='Volume', append=True)
+        data.ta.atr(high='High', low='Low', close='Close', append=True)
+        
+        # 컬럼명 정규화
+        col_mapping = {
+            'VWAP_20': 'vwap',
+            'ISA_9': 'ichi_a',
+            'ISB_26': 'ichi_b',
+            'MACD_12_26_9': 'macd',
+            'MACDh_12_26_9': 'macd_sig',
+            'RSI_14': 'rsi',
+            'MFI_14': 'mfi',
+            'OBV': 'obv',
+            'ATR_14': 'atr'
+        }
+        for old, new in col_mapping.items():
+            if old in data.columns:
+                data[new] = data[old]
 
         last = data.iloc[-1]
         score, details = 50.0, []

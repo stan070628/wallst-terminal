@@ -1,5 +1,4 @@
 import yfinance as yf
-import FinanceDataReader as fdr
 import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta
@@ -8,33 +7,36 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# 한국 주식 기본 목록 (하드코딩)
+KOSPI_STOCKS = {
+    "삼성전자": "005930.KS", "SK하이닉스": "000660.KS", "현대자동차": "005380.KS",
+    "LG화학": "051910.KS", "삼성SDI": "006400.KS", "포스코": "005490.KS",
+    "한국전력": "015760.KS", "한국가스공사": "036460.KS", "SK텔레콤": "017670.KS",
+    "KT": "030200.KS", "NH투자증권": "005940.KS", "신세계": "004270.KS",
+    "롯데마트": "139480.KS", "이마트": "139480.KS", "CJ": "001040.KS",
+    "GS": "078930.KS", "한국타이어": "161390.KS", "아모레퍼시픽": "090430.KS",
+    "삼성화재": "000810.KS", "한국일보": "058650.KS", "HDC현대산업개발": "294870.KS"
+}
+
+KOSDAQ_STOCKS = {
+    "에이치엘비": "028300.KQ", "셀트리온": "068270.KQ", "카카오": "035720.KQ",
+    "네이버": "035420.KQ", "삼성바이오로직스": "207940.KQ", "스튜디오드래곤": "210540.KQ",
+    "메디젠휴먼": "307280.KQ", "씨젠": "096530.KQ", "이씨홍": "038500.KQ",
+    "텐투미디어": "206560.KQ", "엔피디": "079200.KQ", "넷마블": "251270.KQ"
+}
+
 @st.cache_data(ttl=3600) 
 def get_categorized_stocks():
     """시장 전수조사용: KRX 상위 200개 + 나스닥 상위 100개 + 암호화폐 상위 20개"""
     try:
         result = {}
         
-        # 1. KOSPI 상위 200개 (시가총액 기준)
-        try:
-            kospi_df = fdr.StockListing('KOSPI').sort_values('MarCap', ascending=False).head(200)
-            kospi_dict = {row['Name']: f"{row['Code']}.KS" for _, row in kospi_df.iterrows()}
-            result["KOSPI 🇰🇷"] = kospi_dict
-            logger.info(f"✅ KOSPI 종목 {len(kospi_dict)}개 로드")
-        except Exception as e:
-            logger.warning(f"⚠️ KOSPI 로드 실패: {str(e)}")
-            result["KOSPI 🇰🇷"] = {"삼성전자": "005930.KS"}
+        result["KOSPI 🇰🇷"] = KOSPI_STOCKS
+        logger.info(f"✅ KOSPI 종목 {len(KOSPI_STOCKS)}개 로드")
         
-        # 2. KOSDAQ 상위 200개 (시가총액 기준)
-        try:
-            kosdaq_df = fdr.StockListing('KOSDAQ').sort_values('MarCap', ascending=False).head(200)
-            kosdaq_dict = {row['Name']: f"{row['Code']}.KQ" for _, row in kosdaq_df.iterrows()}
-            result["KOSDAQ 🇰🇷"] = kosdaq_dict
-            logger.info(f"✅ KOSDAQ 종목 {len(kosdaq_dict)}개 로드")
-        except Exception as e:
-            logger.warning(f"⚠️ KOSDAQ 로드 실패: {str(e)}")
-            result["KOSDAQ 🇰🇷"] = {}
-        
-        # 3. 나스닥 상위 100개 (시가총액 기준)
+        # 2. KOSDAQ (하드코딩)
+        result["KOSDAQ 🇰🇷"] = KOSDAQ_STOCKS
+        logger.info(f"✅ KOSDAQ 종목 {len(KOSDAQ_STOCKS)}개 로드")
         nasdaq_top_100 = {
             "엔비디아(NVDA)": "NVDA", "마이크로소프트(MSFT)": "MSFT", "애플(AAPL)": "AAPL",
             "아마존(AMZN)": "AMZN", "메타(META)": "META", "테슬라(TSLA)": "TSLA",
@@ -98,19 +100,12 @@ def get_categorized_stocks():
 
 @st.cache_data(ttl=3600) 
 def get_all_krx_stocks():
-    """정밀 진단용: KRX 전 종목 리스트 (3,000+ 종목)"""
-    try:
-        df = fdr.StockListing('KRX')
-        krx_dict = {
-            row['Name']: f"{row['Code']}.KS" if row['Market'] == 'KOSPI' 
-            else f"{row['Code']}.KQ" 
-            for _, row in df.iterrows()
-        }
-        logger.info(f"✅ KRX 전체 종목 {len(krx_dict)}개 로드")
-        return krx_dict
-    except Exception as e:
-        logger.warning(f"⚠️ KRX 전체 조회 실패: {str(e)}, 기본값으로 폴백")
-        return {"삼성전자": "005930.KS", "LG전자": "066570.KS"}
+    """정밀 진단용: KRX 기본 종목 리스트"""
+    krx_dict = {}
+    krx_dict.update(KOSPI_STOCKS)
+    krx_dict.update(KOSDAQ_STOCKS)
+    logger.info(f"✅ KRX 종목 {len(krx_dict)}개 로드")
+    return krx_dict
 
 def get_stock_pool(market_type="all"):
     """시장별 분석용 종목 풀 반환
@@ -139,19 +134,10 @@ def get_stock_pool(market_type="all"):
 def get_current_price(ticker):
     """실시간 시세 수집 엔진"""
     try:
-        if ticker.endswith('.KS') or ticker.endswith('.KQ'):
-            # 한국 종목
-            raw_ticker = ticker.split('.')[0]
-            start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-            df = fdr.DataReader(raw_ticker, start=start_date)
-            price = float(df['Close'].iloc[-1]) if not df.empty else None
-            return price
-        else:
-            # 나스닥, 암호화폐
-            ticker_obj = yf.Ticker(ticker)
-            df = ticker_obj.history(period="1d")
-            price = float(df['Close'].iloc[-1]) if not df.empty else None
-            return price
+        ticker_obj = yf.Ticker(ticker)
+        df = ticker_obj.history(period="1d")
+        price = float(df['Close'].iloc[-1]) if not df.empty else None
+        return price
     except Exception as e:
         logger.warning(f"⚠️ {ticker} 시세 조회 실패: {str(e)}")
         return None
