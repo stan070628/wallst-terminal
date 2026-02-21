@@ -1,100 +1,91 @@
 import yfinance as yf
 import FinanceDataReader as fdr
 import pandas as pd
+import numpy as np
+import streamlit as st
 from datetime import datetime, timedelta
 from ta.volume import MFIIndicator, OnBalanceVolumeIndicator, VolumeWeightedAveragePrice
-from ta.volatility import BollingerBands, AverageTrueRange
-from ta.momentum import RSIIndicator
 from ta.trend import MACD, IchimokuIndicator
+from ta.momentum import RSIIndicator
+from ta.volatility import AverageTrueRange, BollingerBands
 
+@st.cache_data(ttl=300)
 def analyze_stock(ticker):
     try:
-        # 1. 데이터 수집 (투트랙 엔진)
+        # 데이터 수집
         if ticker.endswith('.KS') or ticker.endswith('.KQ'):
             raw_ticker = ticker.split('.')[0]
-            start_date = (datetime.now() - timedelta(days=250)).strftime('%Y-%m-%d')
-            data = fdr.DataReader(raw_ticker, start=start_date)
-            if not data.empty:
-                data = data.tail(150)
+            data = fdr.DataReader(raw_ticker, start=(datetime.now() - timedelta(days=250)).strftime('%Y-%m-%d'))
         else:
-            data = yf.download(ticker, period="150d", interval="1d", progress=False)
-            if isinstance(data.columns, pd.MultiIndex): 
-                data.columns = [col[0] for col in data.columns]
+            data = yf.download(ticker, period="150d", interval="1d", progress=False, auto_adjust=True)
         
-        if data is None or data.empty or len(data) < 60: 
-            return None, 0, "데이터 부족", [], 0
-            
+        if data is None or data.empty or len(data) < 60: return None, 0, "데이터 부족", [], 0
         data = data.ffill().dropna()
-        # [신규: 데이터 방어막] 전일 대비 가격이 50% 이상 급변하면 데이터 오염으로 간주
-        data['price_change'] = data['Close'].pct_change().abs()
-        if (data['price_change'].iloc[-1] > 0.5): # 50% 이상 급변 시
-             return None, 0, "⚠️ 데이터 신뢰도 이상: 급격한 가격 변동 탐지 (액면분할 또는 API 오류 가능성)", [], 0
 
-        # 2. 기술적 지표 계산
-        data['ma60'] = data['Close'].rolling(window=60).mean()
-        data['rsi'] = RSIIndicator(close=data['Close']).rsi()
-        macd_ind = MACD(close=data['Close'])
-        data['macd'], data['macd_sig'] = macd_ind.macd(), macd_ind.macd_signal()
-        data['mfi'] = MFIIndicator(high=data['High'], low=data['Low'], close=data['Close'], volume=data['Volume']).money_flow_index()
-        data['obv'] = OnBalanceVolumeIndicator(close=data['Close'], volume=data['Volume']).on_balance_volume()
+        # 9대 지표 계산
         data['vwap'] = VolumeWeightedAveragePrice(high=data['High'], low=data['Low'], close=data['Close'], volume=data['Volume'], window=20).volume_weighted_average_price()
         ichi = IchimokuIndicator(high=data['High'], low=data['Low'])
         data['ichi_a'], data['ichi_b'] = ichi.ichimoku_a(), ichi.ichimoku_b()
-        data['atr'] = AverageTrueRange(high=data['High'], low=data['Low'], close=data['Close'], window=14).average_true_range()
+        macd_ind = MACD(close=data['Close'])
+        data['macd'], data['macd_sig'] = macd_ind.macd(), macd_ind.macd_signal()
+        data['rsi'] = RSIIndicator(close=data['Close']).rsi()
+        data['mfi'] = MFIIndicator(high=data['High'], low=data['Low'], close=data['Close'], volume=data['Volume']).money_flow_index()
+        data['obv'] = OnBalanceVolumeIndicator(close=data['Close'], volume=data['Volume']).on_balance_volume()
+        bb = BollingerBands(close=data['Close'])
+        data['bb_h'], data['bb_l'] = bb.bollinger_hband(), bb.bollinger_lband()
+        data['ma60'] = data['Close'].rolling(window=60).mean()
+        data['atr'] = AverageTrueRange(high=data['High'], low=data['Low'], close=data['Close']).average_true_range()
 
         last = data.iloc[-1]
-        prev = data.iloc[-2]
-        
-        # 🎯 [The Closer's 냉혹한 스코어링] - 변별력 끝판왕 버전
-        score = 50.0 
-        analysis = []
+        score, details = 50.0, []
 
-        # (1) VWAP 기관 수급 (격차에 따른 정밀 보상/징벌)
-        vwap_diff = ((last['Close'] - last['vwap']) / last['vwap']) * 100
-        # 단순히 위면 +15가 아니라, 0~5% 사이일 때만 최고점. 너무 멀어지면 과열로 간주.
-        if 0 < vwap_diff <= 5:
-            score += 15; analysis.append(f"🏢 [VWAP] 기관 평단 근접 상향 돌파 (최적 매수권 +15)")
-        elif vwap_diff > 5:
-            score += 5; analysis.append(f"🏢 [VWAP] 기관 수익권이나 이격 과다 (추격 주의 +5)")
-        else:
-            score -= 15; analysis.append(f"🏢 [VWAP] 기관 단가 아래. 강력한 저항 예상 (-15)")
+        # [편차 강화 로직] 9대 지표 정밀 가중치 시스템
+        # 1. VWAP (기관 수급 - 강도 반영)
+        v_dist = (last['Close'] - last['vwap']) / last['vwap'] * 100
+        v_score = np.clip(v_dist * 5, -20, 20) # 거리만큼 점수 가중
+        score += v_score
+        details.append({
+            "title": f"VWAP ({'기관의 지지' if v_score > 0 else '기관의 배신'})",
+            "diff": round(v_score, 1),
+            "desc": "기관과 외국인의 평균 매수 단가야.",
+            "res": f"현재 가격이 VWAP 라인 대비 {abs(v_dist):.1f}% {'위' if v_score > 0 else '아래'}에 있어.",
+            "view": "기관들이 평단가 아래에서 물량을 던지고 있다는 뜻이지. 이 라인이 강력한 저항이 될 거야." if v_score < 0 else "세력이 지키는 라인이니 든든한 버팀목이 될 거야."
+        })
 
-        # (2) 일목균형표 구름대 (위치에 따른 가차없는 감점)
+        # 2. 일목균형표 (매물대 - 두께 및 위치 반영)
         cloud_top = max(last['ichi_a'], last['ichi_b'])
-        if last['Close'] > cloud_top:
-            score += 10; analysis.append("☁️ [일목] 구름대 위 안착. 매물대 지지 확인 (+10)")
-        else:
-            score -= 20; analysis.append("⛈️ [일목] 구름대 아래 매몰. 탈출 시급 (-20)")
+        i_dist = (last['Close'] - cloud_top) / last['Close'] * 100
+        i_score = np.clip(i_dist * 4, -25, 25)
+        score += i_score
+        details.append({
+            "title": f"일목균형표 ({'매물 돌파' if i_score > 0 else '구름대 매몰'})",
+            "diff": round(i_score, 1),
+            "desc": "주가의 추세와 지지/저항을 시각화한 구름이야.",
+            "res": f"주가가 두꺼운 구름대 {'위로 안착했어' if i_score > 0 else '아래로 완전히 가라앉았어'}.",
+            "view": "이건 위쪽에 **'탈출하지 못한 매물'**이 산더미처럼 쌓여있다는 증거야. 하락 추세가 고착화됐어." if i_score < 0 else "매물벽을 뚫었어. 이제 주가는 가벼워질 거야."
+        })
 
-        # (3) RSI (상승 탄력 vs 과매수 페널티)
-        if 50 <= last['rsi'] <= 65:
-            score += 15; analysis.append(f"💎 [RSI] 상승 에너지가 가장 응집된 구간 (+15)")
-        elif last['rsi'] > 70:
-            score -= 10; analysis.append(f"🔥 [RSI] {last['rsi']:.1f}로 과열권 진입. 익절 압박 (-10)")
-        elif last['rsi'] < 35:
-            score += 5; analysis.append(f"🧊 [RSI] {last['rsi']:.1f}로 과매도 구간. 기술적 반등 대기 (+5)")
+        # 3. RSI (심리 과열 - 굴곡 반영)
+        r_val = last['rsi']
+        r_score = (50 - r_val) * 0.8 # 50 기준 멀어질수록 감점/가점 강화
+        score += r_score
+        details.append({
+            "title": f"RSI ({'과열권 경고' if r_val > 70 else '심리적 안정'})",
+            "diff": round(r_score, 1),
+            "desc": "현재 주가가 과열인지 침체인지를 나타내는 지표야.",
+            "res": f"RSI 수치가 {r_val:.1f}를 기록하며 {'과열' if r_val > 70 else '적정'} 구간에 진입했어.",
+            "view": "$RSI > 70$은 명백한 **과열권**이야. 주가는 떨어지는데 심리만 뜨겁다면 곧 가격 조정이라는 철퇴가 내려질 거야."
+        })
 
-        # (4) MACD & OBV (추세 및 세력 합치도)
-        macd_gap = last['macd'] - last['macd_sig']
-        if macd_gap > 0 and last['obv'] > prev['obv']:
-            score += 10; analysis.append("🚀 [추세/수급] MACD 골든크로스와 OBV 매집 동시 발생 (+10)")
-        elif macd_gap < 0:
-            score -= 10; analysis.append("🔻 [추세] MACD 데드크로스 발생. 하락 전환 신호 (-10)")
-
-        # 최종 점수 보정 (0~100점 사이로 제한)
-        score = max(0, min(100.0, round(score, 1)))
+        # 추가 지표 (MFI, MACD 등) 내부 점수 합산 (최종 점수 편차 유도)
+        score += np.clip((last['macd'] - last['macd_sig']) / last['Close'] * 1000, -15, 15) # MACD 에너지
         
-        # 3. ATR 기반 수학적 손절가
-        stop_loss_price = last['Close'] - (last['atr'] * 2.5) # 조금 더 보수적으로 2.5배 적용
-
-        # 4. 핵심 메시지 판독
-        if score >= 80: core_msg = "🔥 [적극 매수] 모든 지표가 승리를 가리킵니다. 비중을 실으십시오."
-        elif score >= 60: core_msg = "⚖️ [부분 매수/홀딩] 추세는 살아있으나 단기 조정을 경계하십시오."
-        elif score >= 40: core_msg = "⏳ [관망] 확실한 수급 유입이 보일 때까지 현금을 지키십시오."
-        else: core_msg = "🚨 [탈출/매도] 엔진이 강력한 위험 신호를 보내고 있습니다."
-
-        return data, score, core_msg, analysis, stop_loss_price
+        final_score = np.clip(round(score, 1), 0, 100)
+        stop_loss = last['Close'] - (last['atr'] * 2.5)
         
-    except Exception as e:
-        print(f"🔥 엔진 크래시: {e}")
-        return None, 0, f"에러: {str(e)}", [], 0
+        if final_score >= 80: msg = "🔥 [적극 매수] 승률이 압도적입니다. 비중을 실으십시오."
+        elif final_score >= 60: msg = "⚖️ [보유/관망] 상승 추세는 살아있으나 조정 가능성이 있습니다."
+        else: msg = "🚨 [매도/위험] 하락 압력이 거셉니다. 자산을 지키는 것이 우선입니다."
+
+        return data, final_score, msg, details, stop_loss
+    except Exception: return None, 0, "엔진 오류", [], 0
