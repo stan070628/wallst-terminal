@@ -1,8 +1,6 @@
-streamlit>=1.28.0
-pandas>=2.0.0
-numpy>=1.24.0
-yfinance>=0.2.28
-FinanceDataReader>=0.9.50
-ta>=0.10.2
-plotly>=5.14.0
-python-dotenv>=1.0.0
+streamlit
+yfinance
+ta
+plotly
+pandas
+extra-streamlit-components

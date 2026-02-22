@@ -1,8 +1,54 @@
 import streamlit as st
+import re
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from engine import analyze_stock
 from market_data import get_all_krx_stocks
 from style_utils import apply_global_style
+from stocks import STOCK_DICT
+
+def _find_ticker_from_name(user_input):
+    """한글 이름으로 종목 찾기 (모든 시장 검색)"""
+    user_input = user_input.strip()
+    
+    # 모든 시장에서 검색
+    for market, stocks in STOCK_DICT.items():
+        if user_input in stocks:
+            return stocks[user_input], user_input
+    
+    return None, None
+
+def _search_stocks(query):
+    """부분 검색: 입력된 텍스트를 포함하는 모든 종목 찾기"""
+    if not query or len(query.strip()) < 1:
+        return []
+    
+    query = query.strip().lower()
+    results = []
+    
+    # 모든 시장에서 부분 검색
+    for market, stocks in STOCK_DICT.items():
+        for name, ticker in stocks.items():
+            # 한글 이름 또는 티커로 검색 (대소문자 무시)
+            if query in name.lower() or query in ticker.lower():
+                display_text = f"{name} ({ticker})"
+                results.append({
+                    "name": name,
+                    "ticker": ticker,
+                    "display": display_text,
+                    "market": market
+                })
+    
+    # 중복 제거 및 정렬
+    seen = set()
+    unique_results = []
+    for item in results:
+        key = item['ticker']
+        if key not in seen:
+            seen.add(key)
+            unique_results.append(item)
+    
+    return sorted(unique_results, key=lambda x: x['name'])
 
 def run_scanner_tab(unused_stock_dict):
     apply_global_style()
@@ -35,12 +81,48 @@ def run_scanner_tab(unused_stock_dict):
     col_input1, col_input2 = st.columns([2, 1.2])
     
     with col_input1:
-        search_mode = st.radio("📊 분석 시장 선택", ["🇰🇷 국내 주식", "🌎 글로벌 자산"], horizontal=True, label_visibility="collapsed")
+        search_mode = st.radio("📊 분석 시장 선택", ["🇰🇷 국내 주식/ETF", "🌎 글로벌 자산"], horizontal=True, label_visibility="collapsed")
     
-    if search_mode == "🇰🇷 국내 주식":
-        all_stocks = get_all_krx_stocks()
-        target_name = st.selectbox("📌 종목 검색", list(all_stocks.keys()), key="krx_select")
-        target_ticker = all_stocks[target_name]
+    if search_mode == "🇰🇷 국내 주식/ETF":
+        # 🚨 [부분 검색 기능] "삼성" → 삼성전자, 삼성SDI, 삼성화재 등 리스트됨
+        user_input = st.text_input(
+            "📌 종목 검색 (부분 입력 가능)", 
+            placeholder="예: '삼성' → 삼성전자, 삼성SDI, 삼성화재... | '금' → 금융, 금현물...",
+            help="한글 이름 또는 6자리 코드의 일부만 입력해도 관련 종목이 리스트됩니다"
+        ).strip()
+        
+        target_ticker = None
+        target_name = None
+        
+        if user_input and len(user_input) >= 1:
+            # 🎯 부분 검색 실행
+            search_results = _search_stocks(user_input)
+            
+            if search_results:
+                # 🔍 검색 결과를 selectbox로 표시
+                display_options = [item['display'] for item in search_results]
+                st.caption(f"🔎 검색 결과: {len(search_results)}개 종목")
+                
+                selected_display = st.selectbox(
+                    "📊 분석할 종목 선택",
+                    options=display_options,
+                    label_visibility="collapsed"
+                )
+                
+                # 선택된 항목의 정보 찾기
+                for item in search_results:
+                    if item['display'] == selected_display:
+                        target_ticker = item['ticker']
+                        target_name = f"{item['name']} ({item['ticker']})"
+                        break
+            else:
+                st.warning(f"⚠️ '{user_input}'에 매칭되는 종목이 없습니다. 다른 단어로 검색해주세요.")
+                target_ticker = "229200.KS"
+                target_name = "KODEX 코스닥150 (기본값)"
+        else:
+            # 입력이 없으면 기본값
+            target_ticker = "229200.KS"
+            target_name = "KODEX 코스닥150"
     else:
         target_ticker = st.text_input("💱 글로벌 티커 입력", value="AAPL", placeholder="AAPL, TSLA, BTC-USD").strip().upper()
         target_name = target_ticker
@@ -57,144 +139,271 @@ def run_scanner_tab(unused_stock_dict):
         progress_placeholder = st.empty()
         progress_placeholder.info("🔄 분석 중... 데이터 수집 → 지표 계산 → 신호 생성")
         
-        df, score, msg, details, stop_loss = analyze_stock(target_ticker)
-        progress_placeholder.empty()
-        
-        if df is not None:
-            # 신뢰도 레벨 결정
-            if score >= 75:
-                score_badge = f"<span class='score-badge-excellent'>{score}점 🔥</span>"
-                level_color = "🔴"
-                status_class = "status-danger"
-            elif score >= 55:
-                score_badge = f"<span class='score-badge-good'>{score}점 ⚖️</span>"
-                level_color = "🟡"
-                status_class = "status-warning"
-            elif score >= 40:
-                score_badge = f"<span class='score-badge-neutral'>{score}점 ❄️</span>"
-                level_color = "🔵"
-                status_class = "status-warning"
+        try:
+            result = analyze_stock(target_ticker)
+            progress_placeholder.empty()
+            
+            if result:
+                df, score, msg, details, stop_loss = result
+                
+                if df is not None:
+                    # 신뢰도 레벨 결정
+                    if score >= 75:
+                        score_badge = f"<span class='score-badge-excellent'>{score}점 🔥</span>"
+                        level_color = "🔴"
+                        status_class = "status-danger"
+                    elif score >= 55:
+                        score_badge = f"<span class='score-badge-good'>{score}점 ⚖️</span>"
+                        level_color = "🟡"
+                        status_class = "status-warning"
+                    elif score >= 40:
+                        score_badge = f"<span class='score-badge-neutral'>{score}점 ❄️</span>"
+                        level_color = "🔵"
+                        status_class = "status-warning"
+                    else:
+                        score_badge = f"<span class='score-badge-poor'>{score}점 ⛔</span>"
+                        level_color = "🟢"
+                        status_class = "status-good"
+                    
+                    # 메트릭 대시보드
+                    st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+                    
+                    m1, m2, m3, m4 = st.columns(4, gap="medium")
+                    
+                    with m1:
+                        st.markdown(f"""<div class='metric-card'>
+                        <div class='metric-label'>🎯 AI 신뢰도</div>
+                        <div class='metric-value'>{score_badge}</div>
+                        </div>""", unsafe_allow_html=True)
+                    
+                    with m2:
+                        current_price = int(df['Close'].iloc[-1]) if df['Close'].iloc[-1] > 100 else round(df['Close'].iloc[-1], 2)
+                        st.markdown(f"""<div class='metric-card'>
+                        <div class='metric-label'>💹 현재가</div>
+                        <div class='metric-value' style='font-size: 1.8rem;'>{current_price:,}</div>
+                        </div>""", unsafe_allow_html=True)
+                    
+                    with m3:
+                        stop_loss_val = int(stop_loss) if stop_loss > 100 else round(stop_loss, 2)
+                        st.markdown(f"""<div class='metric-card'>
+                        <div class='metric-label'>🛑 손절가</div>
+                        <div class='metric-value' style='color: #ff3b30; font-size: 1.8rem;'>{stop_loss_val:,}</div>
+                        </div>""", unsafe_allow_html=True)
+                    
+                    with m4:
+                        st.markdown(f"""<div class='metric-card'>
+                        <div class='metric-label'>⚡ 판정</div>
+                        <div class='metric-value' style='font-size: 2.5rem;'>{level_color}</div>
+                        </div>""", unsafe_allow_html=True)
+                    
+                    # 🔥 [신규] 상단 종합 요약: 전문가의 핵심 의견 1-2문장
+                    st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
+                    
+                    if score >= 75:
+                        recommendation = "💎 **매수 강력 추천**: 모든 기술지표가 동의하고 있습니다. 적극적인 매수 타이밍입니다."
+                        summary_style = "background-color: rgba(0, 200, 100, 0.1); border-left: 5px solid #00c864;"
+                    elif score >= 60:
+                        recommendation = "✅ **매수 추천**: 주요 기술지표가 긍정 신호를 보이고 있습니다. 단, 과열 신호 확인 후 진입하세요."
+                        summary_style = "background-color: rgba(0, 180, 100, 0.1); border-left: 5px solid #34c759;"
+                    elif score >= 50:
+                        recommendation = "⚖️ **보류 (관망)**: 기술지표 신호가 엇갈리고 있습니다. 더 명확한 방향성 확인 후 진입하세요."
+                        summary_style = "background-color: rgba(255, 150, 0, 0.1); border-left: 5px solid #ff9500;"
+                    elif score >= 35:
+                        recommendation = "⚠️ **매도 주의**: 단기적 과열 또는 약세 신호가 주도합니다. 기존 보유 종목은 수익실현을 고려하세요."
+                        summary_style = "background-color: rgba(255, 100, 100, 0.1); border-left: 5px solid #ff6b6b;"
+                    else:
+                        recommendation = "🛑 **회피 권장**: 명확한 하락 신호가 우세합니다. 조건이 개선될 때까지 대기하세요."
+                        summary_style = "background-color: rgba(255, 59, 48, 0.1); border-left: 5px solid #ff3b30;"
+                    
+                    st.markdown(f"""
+                    <div style='{summary_style}; padding: 15px; border-radius: 8px;'>
+                    <h3 style='margin-top: 0; color: white;'>🎯 The Closer's 실시간 의견</h3>
+                    <p style='font-size: 1.05rem; color: #e0e0e0;'>{recommendation}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # AI 판정
+                    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='{status_class}'><b>🤖 The Closer's 최종 판정:</b> {msg}</div>", unsafe_allow_html=True)
+                    
+                    # 기술지표 분석 섹션
+                    st.markdown("---")
+                    st.markdown("### 🗂️ The Closer's 정밀 타격 분석 (지표 그룹화)")
+                    
+                    # 최신 지표 값 추출
+                    rsi_val = df['rsi'].iloc[-1]
+                    mfi_val = df['mfi'].iloc[-1]
+                    macd_val = df['macd'].iloc[-1]
+                    macd_sig_val = df['macd_sig'].iloc[-1]
+                    ichi_a_val = df['ichi_a'].iloc[-1]
+                    ichi_b_val = df['ichi_b'].iloc[-1]
+                    vwap_val = df['vwap'].iloc[-1]
+                    volume_latest = df['Volume'].iloc[-1]
+                    volume_avg = df['Volume'].rolling(20).mean().iloc[-1]
+                    atr_val = df['atr'].iloc[-1]
+                    
+                    # --- 1️⃣ [엔진 온도] 모멘텀 및 과열 진단 ---
+                    st.markdown("#### 1️⃣ [엔진 온도] 모멘텀 및 과열 진단")
+                    st.caption("주가가 얼마나 가파르게 올랐는지, 단기적인 피로도와 돈의 흐름을 측정합니다.")
+                    
+                    left_col, right_col = st.columns([1.2, 1])
+                    
+                    with left_col:
+                        col1, col2 = st.columns(2)
+                        col1.metric("🌡️ RSI (엔진 온도)", f"{rsi_val:.1f}", 
+                                   "과매수 (위험)" if rsi_val >= 70 else "과매도" if rsi_val <= 30 else "정상", 
+                                   delta_color="inverse" if rsi_val >= 70 or rsi_val <= 30 else "off")
+                        col2.metric("💰 MFI (자금 흐름)", f"{mfi_val:.1f}", 
+                                   "강세" if mfi_val >= 70 else "약세" if mfi_val <= 30 else "중립", 
+                                   delta_color="off")
+                        
+                        st.info("💡 **전문가 코멘트:** " + 
+                               ("가격 엔진(RSI)이 과열 상태이므로, RSI의 회복(70→50)을 기다리거나, 실제 자금 유입(MFI)의 확인이 필수입니다. 속 빈 강정 가능성을 경계하십시오." if rsi_val >= 70 
+                               else "엔진이 미지근하므로 단기적 반등 확률이 낮습니다. 명확한 신호를 기다리십시오." 
+                               if rsi_val <= 30 else "모멘텀이 정상 범위 내에 있습니다. 안정적 흐름을 기대합니다."))
+                    
+                    with right_col:
+                        # RSI + MFI 차트
+                        fig_rsi = make_subplots(specs=[[{"secondary_y": False}]])
+                        fig_rsi.add_trace(go.Scatter(x=df.index, y=df['rsi'], name='RSI', line=dict(color='#ff6b6b')), secondary_y=False)
+                        fig_rsi.add_trace(go.Scatter(x=df.index, y=df['mfi'], name='MFI', line=dict(color='#4ecdc4')), secondary_y=False)
+                        fig_rsi.add_hline(y=70, line_dash="dash", line_color="#ff6b6b", annotation_text="과매수", secondary_y=False)
+                        fig_rsi.add_hline(y=30, line_dash="dash", line_color="#4ecdc4", annotation_text="과매도", secondary_y=False)
+                        fig_rsi.update_layout(height=250, margin=dict(l=0, r=0, t=20, b=0), hovermode='x unified')
+                        st.plotly_chart(fig_rsi, use_container_width=True)
+                    
+                    st.write("---")
+                    
+                    # --- 2️⃣ [길잡이] 거시적 추세 및 방향성 ---
+                    st.markdown("#### 2️⃣ [길잡이] 거시적 추세 및 방향성")
+                    st.caption("잔파도(노이즈)를 걷어내고, 현재 주가가 향하고 있는 굵직한 방향타를 확인합니다.")
+                    
+                    left_col, right_col = st.columns([1.2, 1])
+                    
+                    with left_col:
+                        macd_signal = "반전 신호 (+)" if macd_val > macd_sig_val else "하락 지속 (-)"
+                        ichimoku_signal = "상승 흐름 (구름대 위)" if ichi_a_val > ichi_b_val else "하락 흐름 (구름대 아래)"
+                        
+                        col3, col4 = st.columns(2)
+                        col3.metric("📊 MACD (추세 신호)", macd_signal)
+                        col4.metric("📈 일목균형표 (Ichimoku)", ichimoku_signal)
+                        
+                        st.info("💡 **전문가 코멘트:** " + 
+                               ("단기적인 과열에도 불구하고, 굵은 물줄기(MACD, 일목균형표)는 여전히 상승을 가리키고 있습니다. 섣부른 매도(Short)보다는 押し目 매수(Pushback Buy)을 노리십시오." 
+                               if macd_val > macd_sig_val and ichi_a_val > ichi_b_val
+                               else "주의: 추세가 꺾일 조짐이 보입니다. 상승 신호의 확인을 기다리는 것이 현명합니다."))
+                    
+                    with right_col:
+                        # MACD + Ichimoku 차트
+                        fig_macd = make_subplots(specs=[[{"secondary_y": False}]])
+                        fig_macd.add_trace(go.Bar(x=df.index, y=df['macd'] - df['macd_sig'], name='MACD Histogram',
+                                                  marker_color=['#ff6b6b' if v > 0 else '#4ecdc4' for v in df['macd'] - df['macd_sig']]),
+                                          secondary_y=False)
+                        fig_macd.add_trace(go.Scatter(x=df.index, y=df['macd'], name='MACD', line=dict(color='#ffa500')), secondary_y=False)
+                        fig_macd.add_trace(go.Scatter(x=df.index, y=df['macd_sig'], name='Signal', line=dict(color='#95e1d3')), secondary_y=False)
+                        fig_macd.update_layout(height=250, margin=dict(l=0, r=0, t=20, b=0), hovermode='x unified')
+                        st.plotly_chart(fig_macd, use_container_width=True)
+                    
+                    st.write("---")
+                    
+                    # --- 3️⃣ [폭발력] 변동성 및 가격 밴드 ---
+                    st.markdown("#### 3️⃣ [폭발력] 변동성 및 가격 밴드")
+                    st.caption("주가가 갇혀있는 박스권의 상/하단 한계치와, 위아래로 튈 수 있는 탄력을 잽니다.")
+                    
+                    left_col, right_col = st.columns([1.2, 1])
+                    
+                    with left_col:
+                        current_price = df['Close'].iloc[-1]
+                        bb_higher_val = df['High'].rolling(20).max().iloc[-1]
+                        bb_lower_val = df['Low'].rolling(20).min().iloc[-1]
+                        bb_position = "상단 근처" if current_price > (bb_higher_val + bb_lower_val) / 2 else "하단 근처" if current_price < (bb_higher_val + bb_lower_val) / 2 else "중간권역"
+                        vol_level = "높음" if atr_val > (df['High'].iloc[-20:] - df['Low'].iloc[-20:]).mean() * 1.2 else "정상"
+                        
+                        col5, col6 = st.columns(2)
+                        col5.metric("💎 볼린저 밴드", bb_position, 
+                                   f"변동성: {vol_level}", 
+                                   delta_color="inverse" if bb_position == "상단 근처" else "off")
+                        col6.metric("🎯 ATR (변동성 범위)", f"{atr_val:.2f}", 
+                                   "높은 변동성" if vol_level == "높음" else "정상 변동성")
+                        
+                        st.info("💡 **전문가 코멘트:** " + 
+                               ("밴드 상단에 머물며 팽팽한 긴장감을 유지하고 있습니다. 상단 돌파 시 다음 저항선까지 쏜살같이 상승할 가능성이 높습니다." 
+                               if bb_position == "상단 근처" 
+                               else "밴드 하단에 접근했습니다. 강한 반등이나 추가 하락이 임박했을 가능성이 있습니다."))
+                    
+                    with right_col:
+                        # BB + ATR 차트
+                        bb_upper = df['High'].rolling(20).max()
+                        bb_lower = df['Low'].rolling(20).min()
+                        bb_mid = (bb_upper + bb_lower) / 2
+                        
+                        fig_bb = go.Figure()
+                        fig_bb.add_trace(go.Scatter(x=df.index, y=bb_upper, name='BB Upper', line=dict(color='rgba(255,107,107,0.4)')))
+                        fig_bb.add_trace(go.Scatter(x=df.index, y=bb_lower, name='BB Lower', line=dict(color='rgba(255,107,107,0.4)'), 
+                                                    fill='tonexty'))
+                        fig_bb.add_trace(go.Scatter(x=df.index, y=df['Close'], name='가격', line=dict(color='#1f77b4')))
+                        fig_bb.update_layout(height=250, margin=dict(l=0, r=0, t=20, b=0), hovermode='x unified')
+                        st.plotly_chart(fig_bb, use_container_width=True)
+                    
+                    st.write("---")
+                    
+                    # --- 4️⃣ [기관의 지문] 수급 및 거래량 프로파일 ---
+                    st.markdown("#### 4️⃣ [기관의 지문] 수급 및 거래량 프로파일")
+                    st.caption("거대 자본의 평단가와 그들이 쌓아놓은 매물대의 두께를 해부합니다.")
+                    
+                    left_col, right_col = st.columns([1.2, 1])
+                    
+                    with left_col:
+                        vwap_signal = "VWAP 상향 돌파" if current_price > vwap_val else "VWAP 하향 이탈"
+                        volume_signal = f"{volume_latest:,.0f}주" 
+                        volume_comment = "평균 이상" if volume_latest > volume_avg else "평균 이하"
+                        
+                        col7, col8 = st.columns(2)
+                        col7.metric("🌊 VWAP (거래량 가중)", vwap_signal)
+                        col8.metric("📊 Volume Profile", volume_signal, volume_comment)
+                        
+                        st.info("💡 **전문가 코멘트:** " + 
+                               ("세력의 평단가(VWAP)를 뚫어내고 거래량이 터졌습니다. 만약 하락하더라도 이 라인이 강한 콘크리트 바닥 역할을 할 것입니다. 강세 신호입니다." 
+                               if current_price > vwap_val and volume_latest > volume_avg
+                               else "거래량이 평균 미만이면서 VWAP 아래에서 출렁이고 있습니다. 동의 부재(Weak Conviction)가 뚜렷합니다."))
+                    
+                    with right_col:
+                        # Volume + VWAP 차트
+                        fig_vol = make_subplots(specs=[[{"secondary_y": True}]])
+                        fig_vol.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume', 
+                                                marker_color=['#ff6b6b' if c > o else '#4ecdc4' 
+                                                             for c, o in zip(df['Close'], df['Open'])]),
+                                        secondary_y=False)
+                        fig_vol.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', 
+                                                    line=dict(color='#ffa500')), secondary_y=True)
+                        fig_vol.update_layout(height=250, margin=dict(l=0, r=0, t=20, b=0), hovermode='x unified')
+                        st.plotly_chart(fig_vol, use_container_width=True)
+                    
+                    st.write("---")
+                    
+                    # 종합 결론
+                    st.markdown("### ⚡ 매매 신호 종합 결론")
+                    
+                    if score >= 80:
+                        st.success(f"최종 판정: 💎 {msg}")
+                        st.markdown("> **🔥 The Closer's 최종 지령:** 모든 신호가 녹불입니다. 이것은 '자신 있는 매수 구간'입니다. 물론 충분한 자금 관리(포지션 사이징) 하에 말입니다.")
+                    elif score >= 50:
+                        st.warning(f"최종 판정: ⚠️ {msg}")
+                        st.markdown("> **🔥 The Closer's 최종 지령:** 거시적 추세는 위를 보지만, 단기 지표가 과열/약세 신호를 띠고 있습니다. 1차 押し目(하락 추세 중 단기 반등)을 노리거나, 재진입 신호(추세 재확인)을 기다리십시오.")
+                    else:
+                        st.error(f"최종 판정: 🛑 {msg}")
+                        st.markdown("> **🔥 The Closer's 최종 지령:** 신호가 명확하지 않거나 하락 신호가 우세합니다. 지금은 관망 구간입니다. 더 명확한 바닥권 신호(RSI <30 + VWAP 돌파 + MFI 상승)를 기다리십시오.")
+                    
+                    st.markdown("---")
+                    
+                else:
+                    st.error(f"❌ '{target_ticker}' 엔진 분석 실패")
+                    st.warning("💡 원인: 해당 ETF/주식의 거래 역사가 너무 짧거나(최소 30일 데이터 필요), 상장폐지 종목이거나, Yahoo Finance 서버에 등재되지 않았습니다.")
             else:
-                score_badge = f"<span class='score-badge-poor'>{score}점 ⛔</span>"
-                level_color = "🟢"
-                status_class = "status-good"
+                st.error(f"❌ '{target_ticker}' 데이터 로드 불가")
+                st.info("💡 입력하신 6자리 코드나 글로벌 티커를 다시 확인하십시오. (예: 국내 229200 → 229200.KS, 글로벌 AAPL)")
             
-            # 메트릭 대시보드
-            st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
-            
-            m1, m2, m3, m4 = st.columns(4, gap="medium")
-            
-            with m1:
-                st.markdown(f"""<div class='metric-card'>
-                <div class='metric-label'>🎯 AI 신뢰도</div>
-                <div class='metric-value'>{score_badge}</div>
-                </div>""", unsafe_allow_html=True)
-            
-            with m2:
-                current_price = int(df['Close'].iloc[-1]) if df['Close'].iloc[-1] > 100 else round(df['Close'].iloc[-1], 2)
-                st.markdown(f"""<div class='metric-card'>
-                <div class='metric-label'>💹 현재가</div>
-                <div class='metric-value' style='font-size: 1.8rem;'>{current_price:,}</div>
-                </div>""", unsafe_allow_html=True)
-            
-            with m3:
-                stop_loss_val = int(stop_loss) if stop_loss > 100 else round(stop_loss, 2)
-                st.markdown(f"""<div class='metric-card'>
-                <div class='metric-label'>🛑 손절가</div>
-                <div class='metric-value' style='color: #ff3b30; font-size: 1.8rem;'>{stop_loss_val:,}</div>
-                </div>""", unsafe_allow_html=True)
-            
-            with m4:
-                st.markdown(f"""<div class='metric-card'>
-                <div class='metric-label'>⚡ 판정</div>
-                <div class='metric-value' style='font-size: 2.5rem;'>{level_color}</div>
-                </div>""", unsafe_allow_html=True)
-            
-            # AI 판정
-            st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='{status_class}'><b>🤖 The Closer's 최종 판정:</b> {msg}</div>", unsafe_allow_html=True)
-            
-            st.markdown(f"---")
-            st.markdown(f"**📊 엔진 판정:** {msg}")
-            
-            # 나머지 분석 결과...
-            for item in details:
-                st.write(f"**{item['title']}**")
-                st.caption(item['full_comment'])
-        else:
-            st.error(f"❌ '{target_name}' 분석 실패\n데이터를 확인하고 다시 시도해주세요.")
-        
-        if df is not None:
-            # 상단 핵심 배너
-            st.markdown(f"#### {target_name} AI 신뢰 점수: <span style='color:white; font-size:3.2rem; font-weight:800;'>{score}점</span>", unsafe_allow_html=True)
-            st.error(f"📍 최종 방어선 (손절가): {stop_loss:,.2f} (ATR 기반)")
-            st.info(f"**The Closer's 판정:** {msg}")
-
-            # 헬퍼 함수: 엔진의 코멘트를 UI 키워드와 매칭
-            def get_realtime_view(keywords):
-                for d in details:
-                    if any(k in d['title'] for k in keywords): return d['full_comment']
-                return "엔진에서 해당 지표의 실시간 데이터를 판독 중입니다."
-
-            # --- [SET 1] 가격/수급/매물 (Indicator 1,2,3,4) ---
-            st.write("---")
-            st.markdown("### 📊 SET 1. 가격 흐름과 세력의 에너지 (Price, VWAP, 구름, MACD)")
-            c1, c2 = st.columns([1, 1.8])
-            with c1:
-                st.info(f"""
-                **💡 지표 이해:** VWAP은 세력 평단가, 구름대는 매물 저항입니다.
-                **🎯 실시간 판독:**
-                * **세력 수급**: {get_realtime_view(['VWAP', '평단가'])}
-                * **매물 저항**: {get_realtime_view(['구름', '일목'])}
-                """)
-            with c2:
-                fig1 = go.Figure()
-                fig1.add_trace(go.Scatter(x=df.index, y=df['ichi_a'], line=dict(width=0), showlegend=False))
-                fig1.add_trace(go.Scatter(x=df.index, y=df['ichi_b'], fill='tonexty', fillcolor='rgba(128, 128, 128, 0.2)', line=dict(width=0), name='구름대'))
-                fig1.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='주가'))
-                fig1.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='orange', width=2)))
-                # MACD 분포 Overlay
-                m_h = df['macd'] - df['macd_sig']
-                fig1.add_trace(go.Bar(x=df.index, y=m_h, marker_color=['rgba(255, 59, 48, 0.3)' if x > 0 else 'rgba(0, 122, 255, 0.3)' for x in m_h], yaxis='y2', name='MACD에너지'))
-                fig1.update_layout(height=450, template="plotly_dark", xaxis_rangeslider_visible=False, showlegend=False,
-                                  yaxis2=dict(overlaying='y', side='right', showgrid=False, range=[-max(abs(m_h))*4, max(abs(m_h))*4]))
-                st.plotly_chart(fig1, use_container_width=True)
-
-            # --- [SET 2] 시장 온도 (Indicator 5,6) ---
-            st.write("---")
-            st.markdown("### 🌡️ SET 2. 시장의 과열도 및 심리 (RSI, MFI)")
-            c3, c4 = st.columns([1, 1.8])
-            with c3:
-                st.info(f"""
-                **💡 지표 이해:** RSI와 MFI는 시장의 체온입니다.
-                **🎯 실시간 판독:**
-                * **엔진 온도**: {get_realtime_view(['RSI', '온도'])}
-                """)
-            with c4:
-                fig2 = go.Figure()
-                fig2.add_trace(go.Scatter(x=df.index, y=df['rsi'], name='RSI', line=dict(color='yellow')))
-                fig2.add_trace(go.Scatter(x=df.index, y=df['mfi'], name='MFI', line=dict(color='lime', dash='dot')))
-                fig2.add_hline(y=70, line_dash="dash", line_color="red"); fig2.add_hline(y=30, line_dash="dash", line_color="blue")
-                fig2.update_layout(height=300, template="plotly_dark")
-                st.plotly_chart(fig2, use_container_width=True)
-
-            # --- [SET 3] 자금 흐름 (Indicator 7,8) ---
-            st.write("---")
-            st.markdown("### 💰 SET 3. 거래량과 자금 매집 흔적 (OBV, Volume)")
-            c5, c6 = st.columns([1, 1.8])
-            with c5:
-                obv_status = "매집 중" if df['obv'].iloc[-1] > df['obv'].iloc[-5] else "이탈 중"
-                st.info(f"""
-                **💡 지표 이해:** OBV는 거래량의 누적 에너지를 보여줍니다.
-                **🎯 실시간 판독:**
-                * **자금 유출입**: 현재 {target_name}의 큰손들은 자금을 **{obv_status}**인 것으로 분석됩니다.
-                """)
-            with c6:
-                fig3 = go.Figure()
-                fig3.add_trace(go.Scatter(x=df.index, y=df['obv'], name='OBV', line=dict(color='cyan')))
-                fig3.add_trace(go.Bar(x=df.index, y=df['Volume'], marker_color='gray', opacity=0.3, yaxis='y2', name='Volume'))
-                fig3.update_layout(height=300, template="plotly_dark", yaxis2=dict(overlaying='y', side='right', showgrid=False), showlegend=False)
-                st.plotly_chart(fig3, use_container_width=True)
-
-        else:
-            st.error("❌ 데이터 로드 실패: 티커 형식을 확인하십시오.")
+        except Exception as e:
+            progress_placeholder.empty()
+            st.error(f"📡 시스템 오류: {str(e)}")
+            st.info("💡 시스템 점검  중입니다. 잠시 후 다시 시도해주세요.")

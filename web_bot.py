@@ -1,11 +1,49 @@
 import streamlit as st
 import os
+import json
+from datetime import datetime, timedelta
+
 from stocks import STOCK_DICT
 from tab_market import run_market_tab
 from tab_scanner import run_scanner_tab
 from tab_portfolio import run_portfolio_tab
 from style_utils import apply_global_style
 from user_manager import verify_user, save_user, load_users
+
+# --- [세션 파일 기반 관리] ---
+SESSION_FILE = "session_store.json"
+
+def load_session_store():
+    """세션 저장소에서 세션 정보 로드"""
+    if os.path.exists(SESSION_FILE):
+        try:
+            with open(SESSION_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                # 만료된 세션 확인
+                if "expires_at" in data:
+                    expires_at = datetime.fromisoformat(data["expires_at"])
+                    if datetime.now() > expires_at:
+                        return None  # 세션 만료
+                return data
+        except:
+            return None
+    return None
+
+def save_session(user_id):
+    """세션 저장소에 세션 정보 저장 (30일 유효)"""
+    session_data = {
+        "user_id": user_id,
+        "logged_in": True,
+        "created_at": datetime.now().isoformat(),
+        "expires_at": (datetime.now() + timedelta(days=30)).isoformat()
+    }
+    with open(SESSION_FILE, "w", encoding="utf-8") as f:
+        json.dump(session_data, f, ensure_ascii=False, indent=2)
+
+def clear_session():
+    """세션 저장소 초기화"""
+    if os.path.exists(SESSION_FILE):
+        os.remove(SESSION_FILE)
 
 def auth_page():
     st.markdown("<h1 style='text-align:center; color:white;'>🔐 aibox 전문가 터미널</h1>", unsafe_allow_html=True)
@@ -21,8 +59,7 @@ def auth_page():
                 if not u_id or not u_pw:
                     st.error("아이디와 비밀번호를 모두 입력해주세요.")
                 elif verify_user(u_id, u_pw):
-                    st.session_state.logged_in = True
-                    st.session_state.user_id = u_id
+                    login_user(u_id)
                     st.rerun()
                 else:
                     st.error("정보가 일치하지 않습니다. 아이디를 먼저 등록하셨나요?")
@@ -57,12 +94,40 @@ def auth_page():
         except Exception as e:
             st.error(f"초기화 중 오류가 발생했습니다: {str(e)}")
 
+def login_user(username):
+    st.session_state.logged_in = True
+    st.session_state.user_id = username
+    # 파일 기반 세션 저장
+    save_session(username)
+
+def logout_user():
+    st.session_state.logged_in = False
+    st.session_state.user_id = None
+    # 파일 기반 세션 삭제
+    clear_session()
+    st.rerun()
+
+# 전역 자동 로그인 체크 코드 제거
+# saved_user = cookie_manager.get("user_session")
+# if 'logged_in' not in st.session_state:
+#     if saved_user:
+#         st.session_state.logged_in = True
+#         st.session_state.user_id = saved_user
+#     else:
+#         st.session_state.logged_in = False
+#         st.session_state.user_id = None
+
 def main():
     st.set_page_config(page_title="aibox - The Closer", layout="wide")
     apply_global_style()
     
-    # 세션 상태 초기화
-    if 'logged_in' not in st.session_state:
+    # 저장된 세션 파일 확인 및 자동 로그인
+    saved_session = load_session_store()
+    
+    if saved_session and saved_session.get("logged_in"):
+        st.session_state.logged_in = True
+        st.session_state.user_id = saved_session.get("user_id")
+    elif 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
         st.session_state.user_id = None
 
@@ -76,12 +141,8 @@ def main():
                 "🔍 종목 정밀 진단", 
                 "📊 내 계좌 관리"
             ])
-            
             if st.sidebar.button("시스템 로그아웃", key="logout_btn"):
-                st.session_state.logged_in = False
-                st.session_state.user_id = None
-                st.rerun()
-            
+                logout_user()
             # 메뉴 선택에 따라 탭 실행
             if menu == "🔥 시장 전수조사":
                 run_market_tab(STOCK_DICT)
