@@ -159,29 +159,56 @@ def show_rebalancing_analysis(my_stocks):
     results = []
     failed_stocks = []
     total_eval_value = 0
+    # 해외(USD) 원문 합계(USD 기준)
+    total_eval_value_usd = 0.0
     
     with st.status("🚀 포트폴리오 정밀 해부 중...", expanded=True) as status:
         for stock in my_stocks:
             try:
                 df, score, msg, _, _ = analyze_stock(stock['ticker'])
                 if df is not None and score is not None:
-                    curr_price = df['Close'].iloc[-1]
-                    prev_price = df['Close'].iloc[-2] if len(df) > 1 else curr_price
-                    change_rate = ((curr_price - prev_price) / prev_price * 100) if prev_price != 0 else 0
-                    eval_val = curr_price * stock['quantity']
+                    # 원화 환산 처리: 글로벌(USD) 자산은 환율을 적용하여 KRW로 통일
+                    curr_price = float(df['Close'].iloc[-1])
+                    prev_price = float(df['Close'].iloc[-2]) if len(df) > 1 else curr_price
+
+                    currency = stock.get('currency', 'KRW')
+                    exchange_rate = stock.get('exchange_rate', None)
+                    # 환율 정보가 없거나 USD로 표기되어 있으나 환율이 None이면 실시간 조회
+                    if currency == 'USD' and (not exchange_rate or exchange_rate == 1.0):
+                        try:
+                            exchange_rate = float(get_current_exchange_rate())
+                        except:
+                            exchange_rate = 1300.0
+
+                    if currency == 'USD':
+                        curr_price_krw = curr_price * exchange_rate
+                        prev_price_krw = prev_price * exchange_rate
+                        # 원문(USD) 합계에 더함
+                        total_eval_value_usd += curr_price * float(stock.get('quantity', 0))
+                    else:
+                        curr_price_krw = curr_price
+                        prev_price_krw = prev_price
+
+                    change_rate = ((curr_price_krw - prev_price_krw) / prev_price_krw * 100) if prev_price_krw != 0 else 0
+                    eval_val = curr_price_krw * stock['quantity']
                     total_eval_value += eval_val
                     
                     results.append({
                         "종목명": stock['name'],
                         "티커": stock['ticker'],
-                        "현재가": curr_price,
+                        # 현재가는 원화 기준으로 통일하여 표시
+                        "현재가": curr_price_krw,
+                        # 원문 가격/통화 정보도 함께 보관
+                        "원문현재가": curr_price,
+                        "원문통화": currency,
                         "보유수량": stock['quantity'],
                         "평가금액": eval_val,
+                        "원문평가금액": curr_price * stock['quantity'] if currency == 'USD' else None,
                         "변화율": change_rate,
                         "AI점수": score,
                         "상태": msg,
                         "통화": stock.get('currency', 'KRW'),
-                        "환율": stock.get('exchange_rate', 1.0)
+                        "환율": exchange_rate if exchange_rate is not None else 1.0
                     })
                 else:
                     failed_stocks.append(stock['name'])
@@ -228,7 +255,13 @@ def show_rebalancing_analysis(my_stocks):
         st.markdown("### 📈 포트폴리오 개요")
         col_overview1, col_overview2, col_overview3, col_overview4 = st.columns(4)
         with col_overview1:
-            st.metric("총 평가액", str(f"{int(float(total_eval_value)):,}원"))
+            st.metric("총 평가액 (KRW)", str(f"{int(float(total_eval_value)):,}원"))
+            # 해외(USD) 원문 합계 표시
+            try:
+                if total_eval_value_usd > 0:
+                    st.caption(f"해외 평가 합계: ${total_eval_value_usd:,.2f} (원문 기준)")
+            except:
+                pass
         with col_overview2:
             st.metric("보유 종목", str(f"{len(df_p)}개"))
         with col_overview3:
