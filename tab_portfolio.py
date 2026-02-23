@@ -677,7 +677,16 @@ def run_portfolio_tab(unused_stock_dict):
         for idx, stock in enumerate(reversed(st.session_state.my_stocks)):
             actual_idx = len(st.session_state.my_stocks) - 1 - idx
             with st.container(border=True):
-                _, score, msg, _, _ = analyze_stock(stock['ticker'])
+                try:
+                    result = analyze_stock(stock['ticker'])
+                    if result and result[0] is not None:
+                        _, score, msg, _, _ = result
+                    else:
+                        score = 0
+                        msg = "⚠️ 데이터 로드 실패 (티커 확인 필요)"
+                except Exception:
+                    score = 0
+                    msg = "⚠️ API 연결 오류"
                 qty = stock.get('quantity', 0)
                 buy_price = stock.get('buy_price', 0)
                 currency = stock.get('currency', 'KRW')

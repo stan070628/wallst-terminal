@@ -64,14 +64,28 @@ def analyze_stock(ticker, period="6mo"):
     try:
         stock = yf.Ticker(ticker)
         # 🚨 [핵심] ETF는 auto_adjust=False로 가져오는 것이 NaN 누락 방지에 유리
-        df = stock.history(period=period, auto_adjust=False)
+        # 암호화폐/글로벌 자산은 auto_adjust=True 폴백
+        df = None
+        for auto_adj in [False, True]:
+            try:
+                df = stock.history(period=period, auto_adjust=auto_adj)
+                if df is not None and not df.empty and len(df) >= 30:
+                    break
+            except:
+                continue
         
         # [데이터 부족 시 자동 확대] 30일 미만이면 더 긴 기간 요청
         if df is None or df.empty or len(df) < 30:
-            df = stock.history(period="1y", auto_adjust=False)
-            
-        if df is None or df.empty or len(df) < 30:
-            df = stock.history(period="2y", auto_adjust=False)
+            for p in ["1y", "2y"]:
+                for auto_adj in [False, True]:
+                    try:
+                        df = stock.history(period=p, auto_adjust=auto_adj)
+                        if df is not None and not df.empty and len(df) >= 30:
+                            break
+                    except:
+                        continue
+                if df is not None and not df.empty and len(df) >= 30:
+                    break
             
         if df is None or df.empty or len(df) < 30:
             return None, 0, "데이터 수집 실패 (최소 30일 필요)", [], 0

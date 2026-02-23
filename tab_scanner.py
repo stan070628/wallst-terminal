@@ -18,20 +18,26 @@ def _find_ticker_from_name(user_input):
     
     return None, None
 
-def _search_stocks(query):
-    """부분 검색: 입력된 텍스트를 포함하는 모든 종목 찾기"""
+def _search_stocks(query, market_filter=None):
+    """부분 검색: 입력된 텍스트를 포함하는 모든 종목 찾기 (시장 필터 지원)"""
     if not query or len(query.strip()) < 1:
         return []
     
     query = query.strip().lower()
     results = []
     
-    # 모든 시장에서 부분 검색
-    for market, stocks in STOCK_DICT.items():
+    # 시장 필터가 있으면 해당 시장만, 없으면 전체 검색
+    if market_filter:
+        search_markets = {k: v for k, v in STOCK_DICT.items() if k in market_filter}
+    else:
+        search_markets = STOCK_DICT
+    
+    for market, stocks in search_markets.items():
         for name, ticker in stocks.items():
             # 한글 이름 또는 티커로 검색 (대소문자 무시)
             if query in name.lower() or query in ticker.lower():
-                display_text = f"{name} ({ticker})"
+                market_label = "🔵KOSPI" if market == "KOSPI" else "🟢KOSDAQ" if market == "KOSDAQ" else "🌎GLOBAL"
+                display_text = f"[{market_label}] {name} ({ticker})"
                 results.append({
                     "name": name,
                     "ticker": ticker,
@@ -84,6 +90,16 @@ def run_scanner_tab(unused_stock_dict):
         search_mode = st.radio("📊 분석 시장 선택", ["🇰🇷 국내 주식/ETF", "🌎 글로벌 자산"], horizontal=True, label_visibility="collapsed")
     
     if search_mode == "🇰🇷 국내 주식/ETF":
+        # 시장 세부 선택 (KOSPI / KOSDAQ / 전체)
+        kr_market_filter = st.radio("📌 시장 필터", ["전체 (KOSPI+KOSDAQ)", "KOSPI만", "KOSDAQ만"], horizontal=True, label_visibility="collapsed")
+        
+        if kr_market_filter == "KOSPI만":
+            market_keys = ["KOSPI"]
+        elif kr_market_filter == "KOSDAQ만":
+            market_keys = ["KOSDAQ"]
+        else:
+            market_keys = ["KOSPI", "KOSDAQ"]
+        
         # 🚨 [부분 검색 기능] "삼성" → 삼성전자, 삼성SDI, 삼성화재 등 리스트됨
         user_input = st.text_input(
             "📌 종목 검색 (부분 입력 가능)", 
@@ -95,8 +111,8 @@ def run_scanner_tab(unused_stock_dict):
         target_name = None
         
         if user_input and len(user_input) >= 1:
-            # 🎯 부분 검색 실행
-            search_results = _search_stocks(user_input)
+            # 🎯 부분 검색 실행 (시장 필터 적용)
+            search_results = _search_stocks(user_input, market_filter=market_keys)
             
             if search_results:
                 # 🔍 검색 결과를 selectbox로 표시
