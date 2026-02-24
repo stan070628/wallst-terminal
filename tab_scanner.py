@@ -140,8 +140,46 @@ def run_scanner_tab(unused_stock_dict):
             target_ticker = "229200.KS"
             target_name = "KODEX 코스닥150"
     else:
-        target_ticker = st.text_input("💱 글로벌 티커 입력", value="AAPL", placeholder="AAPL, TSLA, BTC-USD").strip().upper()
-        target_name = target_ticker
+        user_input_global = st.text_input(
+            "💱 종목명, 6자리 코드, 또는 코인명",
+            value="AAPL",
+            placeholder="예: 229200, 비트코인, NVDA",
+            help="암호화폐(비트코인/이더리움/리플), 6자리 한국 코드, 또는 미국 티커"
+        )
+
+        # [스마트 티커 분류기]
+        CRYPTO_MAP = {
+            "비트코인": "BTC-USD", "BITCOIN": "BTC-USD", "BTC": "BTC-USD",
+            "이더리움": "ETH-USD", "ETHEREUM": "ETH-USD", "ETH": "ETH-USD",
+            "리플": "XRP-USD", "XRP": "XRP-USD",
+            "솔라나": "SOL-USD", "SOL": "SOL-USD",
+            "도지코인": "DOGE-USD", "DOGE": "DOGE-USD",
+        }
+
+        clean_input = user_input_global.strip().replace(" ", "").upper()
+        ticker = None
+
+        # 1단계: 암호화폐 하이패스 — 절대 .KS/.KQ가 붙지 않음
+        for key, val in CRYPTO_MAP.items():
+            if key in clean_input:
+                ticker = val
+                break
+
+        # 직접 '-USD' 또는 '-KRW' 형식으로 입력한 경우 그대로 통과
+        if not ticker and ("-KRW" in clean_input or "-USD" in clean_input):
+            ticker = clean_input
+
+        # 2단계: 숫자 6자리 → 한국 주식/ETF
+        if not ticker:
+            numbers_only = re.sub(r'[^0-9]', '', clean_input)
+            if len(numbers_only) == 6:
+                ticker = f"{numbers_only}.KS"
+            else:
+                # 영어 알파벳 → 미국 주식 티커 그대로
+                ticker = clean_input if clean_input else "AAPL"
+
+        target_ticker = ticker
+        target_name = f"{user_input_global.strip()} ({target_ticker})" if user_input_global.strip() else target_ticker
 
     with col_input2:
         pass
