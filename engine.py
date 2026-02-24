@@ -77,11 +77,20 @@ def check_fundamentals(ticker_obj):
             penalty += 20.0
             messages.append("⚠️ [재무 경고] 최근 실적 지속 적자 (EPS 마이너스, -20점 감점)")
 
-        # 3. 빚쟁이 검증 (부채비율 200% 초과)
+        # 3. 빚쟁이 검증 (부채비율 200% 초과) - 금융/은행업 예외 처리
         debt_equity = info.get('debtToEquity', 0)
+        industry = info.get('industry', '').lower()
+        sector = info.get('sector', '').lower()
+
+        # 'bank', 'financial', 'insurance' 등 금융 섹터는 예외
+        is_financial = any(keyword in industry or keyword in sector for keyword in ['bank', 'financial', 'insurance'])
+
         if debt_equity is not None and debt_equity > 200:
-            penalty += 10.0
-            messages.append("⚠️ [부채 경고] 부채비율 200% 초과 (자본 잠식 우려, -10점 감점)")
+            if is_financial:
+                messages.append("💡 [재무 참고] 금융업종 특수성 (부채비율 패널티 면제)")
+            else:
+                penalty += 10.0
+                messages.append("⚠️ [부채 경고] 부채비율 200% 초과 (자본 잠식 우려, -10점 감점)")
 
         if penalty == 0.0:
             messages.append("✅ [재무 건전성] 펀더멘털 양호 (적자/자본잠식 징후 없음)")
