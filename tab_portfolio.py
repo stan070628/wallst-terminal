@@ -182,6 +182,9 @@ def show_rebalancing_analysis(my_stocks):
     total_eval_value_usd = 0.0
     
     with st.status("🚀 포트폴리오 정밀 해부 중...", expanded=True) as status:
+        # [환율 전역 캐시] 루프 전 1회 호출 — 루프 내 반복 API 호출 제거
+        fx_rate_session = float(get_current_exchange_rate())
+
         for stock in my_stocks:
             try:
                 df, score, msg, _, _ = analyze_stock(stock['ticker'], apply_fundamental=True)
@@ -192,12 +195,9 @@ def show_rebalancing_analysis(my_stocks):
 
                     currency = stock.get('currency', 'KRW')
                     exchange_rate = stock.get('exchange_rate', None)
-                    # 환율 정보가 없거나 USD로 표기되어 있으나 환율이 None이면 실시간 조회
+                    # 루프 밖에서 가져온 환율 사용 (API 중복 호출 제거)
                     if currency == 'USD' and (not exchange_rate or exchange_rate == 1.0):
-                        try:
-                            exchange_rate = float(get_current_exchange_rate())
-                        except:
-                            exchange_rate = 1300.0
+                        exchange_rate = fx_rate_session
 
                     if currency == 'USD':
                         curr_price_krw = curr_price * exchange_rate

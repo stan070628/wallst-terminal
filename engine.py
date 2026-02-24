@@ -20,35 +20,79 @@ except ImportError:
     IchimokuIndicator = None
     VolumeWeightedAveragePrice = None
 
-def calculate_sharp_score(rsi, mfi, bb_lower, curr_price, macd_diff):
+def calculate_sharp_score(rsi, mfi, bb_lower, curr_price, macd_diff,
+                          ichi_a=None, ichi_b=None, vwap=None, macd_diff_pct=None):
     """
-    [The Closer's 연속형(Continuous) 채점기]
-    계단식 배점을 폐기하고, 지표의 수치를 소수점까지 점수로 환산합니다.
-    단 하나의 동점자도 발생하지 않도록 0.1점 단위의 압도적 변별력을 부여합니다.
+    [The Closer's Multi-Factor 채점기 v2 — 다중공선성 해소 버전]
+
+    기존 RSI+MFI 80점 집중(다중공선성) 폐기.
+    6개 독립 팩터로 분산하여 보다 정밀한 신호 추출:
+
+    팩터           만점   비고
+    ─────────────────────────────────────────
+    RSI  (과매도)   20pt  오실레이터: 절반으로 축소
+    MFI  (수급)     20pt  오실레이터: 절반으로 축소
+    BB   (밴드 위치)15pt  하단 이탈 강도
+    MACD (추세 크기)15pt  방향+크기 반영 (기존 이진 폐기)
+    Ichimoku(클라우드)15pt 독립 추세선
+    VWAP (수급 이탈)15pt  VWAP 괴리율
+    ─────────────────────────────────────────
+    합계            100pt
     """
-    # 1. RSI Score (0~40점 만점): 선형 보간법 적용
-    # RSI가 60 이상이면 0점, 20 이하로 갈수록 40점 만점에 수렴
-    rsi_score = max(0.0, min(40.0, (60.0 - rsi) * 1.0))
+    # 1. RSI Score (0~20pt): RSI < 60 → 선형, RSI ≤ 20 → 20점 만점
+    rsi_score = max(0.0, min(20.0, (60.0 - rsi) * 0.5))
 
-    # 2. MFI Score (0~40점 만점): 자금 유입 강도
-    # MFI가 60 이상이면 0점, 20 이하로 갈수록 40점 만점
-    mfi_score = max(0.0, min(40.0, (60.0 - mfi) * 1.0))
+    # 2. MFI Score (0~20pt): 동일 로직 — 하지만 RSI와 가중치 절반으로 분리
+    mfi_score = max(0.0, min(20.0, (60.0 - mfi) * 0.5))
 
-    # 3. Bollinger Band (0~10점): 하단 이탈 한계선 측정
-    # 하단선 대비 5% 이내(1.05) 진입 시부터 거리에 비례해 점수 부여 (딱 맞으면 10점)
-    bb_ratio = (curr_price / bb_lower) if bb_lower > 0 else 1.0
-    bb_score = 0.0
+    # 3. Bollinger Band (0~15pt): 하단 이탈 강도 (5%→15pt 상향 스케일)
+    bb_ratio = (curr_price / bb_lower) if bb_lower and bb_lower > 0 else 1.0
     if bb_ratio <= 1.05:
-        bb_score = max(0.0, min(10.0, (1.05 - bb_ratio) * 200.0))
+        bb_score = max(0.0, min(15.0, (1.05 - bb_ratio) * 300.0))
+    else:
+        bb_score = 0.0
 
-    # 4. MACD (0 또는 10점): 추세 반전 여부
-    macd_score = 10.0 if macd_diff > 0 else 0.0
+    # 4. MACD Score (0~15pt): 방향 + 크기 비례 (기존 이진 10pt 폐기)
+    #    macd_diff > 0이면 기본 7pt + 크기 보너스, 0 이하면 0pt
+    if macd_diff > 0:
+        # macd_diff_pct가 없으면 diff 절대값의 로그 스케일 사용
+        if macd_diff_pct and macd_diff_pct > 0:
+            magnitude_bonus = min(8.0, macd_diff_pct * 200.0)
+        else:
+            magnitude_bonus = min(8.0, abs(macd_diff) * 5.0)
+        macd_score = min(15.0, 7.0 + magnitude_bonus)
+    else:
+        macd_score = 0.0
 
-    # 총합 연산 (소수점 첫째 자리까지만 살려서 강력한 변별력 확보)
-    raw_score = rsi_score + mfi_score + bb_score + macd_score
-    final_score = round(min(100.0, max(0.0, raw_score)), 1)
+    # 5. Ichimoku Cloud Score (0~15pt): 독립 추세선
+    #    가격이 구름 아래/구름 상승 배열 시 매수 기회 신호
+    ichi_score = 0.0
+    if ichi_a is not None and ichi_b is not None:
+        cloud_top = max(ichi_a, ichi_b)
+        cloud_bot = min(ichi_a, ichi_b)
+        if curr_price < cloud_bot:          # 가격이 구름 완전 하단 → 강한 과매도
+            ichi_score = 12.0
+        elif curr_price < cloud_top:        # 구름 내부 진입 → 중립
+            ichi_score = 6.0
+        # 구름 위는 0점 (과매수 구간)
+        if ichi_a > ichi_b:                 # 상승 구름 배열 보너스
+            ichi_score = min(15.0, ichi_score + 3.0)
+    else:
+        ichi_score = 7.5  # 데이터 없으면 중립값
 
-    return final_score
+    # 6. VWAP Divergence Score (0~15pt): VWAP 대비 괴리율
+    #    현재가가 VWAP 아래 → 수급 불균형으로 인한 저평가 가능성
+    vwap_score = 0.0
+    if vwap and vwap > 0:
+        divergence = (vwap - curr_price) / vwap  # 양수 = VWAP 아래
+        if divergence > 0:
+            vwap_score = min(15.0, divergence * 300.0)
+        # VWAP 위는 0점 (이미 프리미엄 구간)
+    else:
+        vwap_score = 7.5  # 데이터 없으면 중립값
+
+    raw_score = rsi_score + mfi_score + bb_score + macd_score + ichi_score + vwap_score
+    return round(min(100.0, max(0.0, raw_score)), 1)
 
 def check_fundamentals(ticker_obj):
     """
@@ -64,17 +108,29 @@ def check_fundamentals(ticker_obj):
         if info.get('quoteType') in ['ETF', 'MUTUALFUND', 'CRYPTOCURRENCY'] or 'ETF' in info.get('shortName', ''):
             return 0.0, ["💡 [자산 분류] ETF/펀드/암호화폐 (재무 검증 면제)"]
 
-        # 1. 동전주 검증 (1000원 미만)
-        current_price = info.get('currentPrice', info.get('regularMarketPrice', 0))
-        if current_price > 0 and current_price < 1000:
-            penalty += 30.0
-            messages.append("🚨 [치명적 경고] 주가 1,000원 미만 동전주 (상폐 위험, -30점 감점)")
+        # 1. 시가총액 검증 (동전주 기준 폐기 → 시총 절대 기준)
+        #    한국주 < 300억원, 글로벌 < $2억 → 유동성/상폐 위험 페널티
+        market_cap = info.get('marketCap', 0)
+        ticker_sym = getattr(ticker_obj, 'ticker', '').upper()
+        is_korean = ticker_sym.endswith('.KS') or ticker_sym.endswith('.KQ')
+        if market_cap and market_cap > 0:
+            if is_korean and market_cap < 30_000_000_000:    # 300억 미만
+                penalty += 25.0
+                messages.append(f"🚨 [유동성 경고] 시가총액 {market_cap/1e8:.0f}억원 — 300억 미달 소형주 (-25점)")
+            elif not is_korean and market_cap < 200_000_000:  # $2억 미만
+                penalty += 25.0
+                messages.append(f"🚨 [유동성 경고] 시가총액 ${market_cap/1e6:.0f}M — $200M 미달 마이크로캡 (-25점)")
 
-        # 2. 실적 검증 (EPS 마이너스 = 적자 기업)
+        # 2. 실적 검증 (EPS — 성장주 예외 반영)
+        #    적자기업이라도 매출성장 > 20% YoY이면 성장주 패스
         eps = info.get('trailingEps', 0)
+        revenue_growth = info.get('revenueGrowth', 0) or 0  # e.g. 0.35 = 35%
         if eps is not None and eps < 0:
-            penalty += 20.0
-            messages.append("⚠️ [재무 경고] 최근 실적 지속 적자 (EPS 마이너스, -20점 감점)")
+            if revenue_growth > 0.20:  # 매출 20%↑ 이상 성장: 성장주 예외
+                messages.append(f"💡 [성장주 예외] 적자이나 매출 성장 {revenue_growth*100:.0f}%↑ — EPS 페널티 면제")
+            else:
+                penalty += 20.0
+                messages.append("⚠️ [재무 경고] 최근 실적 지속 적자 (EPS 마이너스, -20점 감점)")
 
         # 3. 빚쟁이 검증 (부채비율 200% 초과) - 금융/은행업 예외 처리
         debt_equity = info.get('debtToEquity', 0)
@@ -99,40 +155,70 @@ def check_fundamentals(ticker_obj):
 
     return penalty, messages
 
-def get_closer_verdict_and_comment(final_score, rsi, mfi, curr_price, bb_lower, macd_diff, fund_penalty=0.0):
+def get_closer_verdict_and_comment(final_score, rsi, mfi, curr_price, bb_lower, macd_diff, fund_penalty=0.0,
+                                    ichi_a=None, ichi_b=None, vwap=None, macd_diff_pct=None, atr_val=None):
     """
-    [The Closer's 실시간 의견 생성기]
-    명확한 Action(매수/매도/보류)을 하달하고, 점수의 근거를 낱낱이 해부합니다.
+    [The Closer's 실시간 의견 생성기 — Multi-Factor v2]
+    점수 내역을 6팩터 기준으로 낱낱이 해부합니다.
     """
-    # 1. 뼈대가 되는 기술적 점수 역산 (엔진 로직과 100% 동일하게 표시)
-    rsi_score = round(max(0.0, min(40.0, (60.0 - rsi) * 1.0)), 1)
-    mfi_score = round(max(0.0, min(40.0, (60.0 - mfi) * 1.0)), 1)
-    bb_ratio = (curr_price / bb_lower) if bb_lower > 0 else 1.0
-    bb_score = round(max(0.0, min(10.0, (1.05 - bb_ratio) * 200.0)), 1) if bb_ratio <= 1.05 else 0.0
-    macd_score = 10.0 if macd_diff > 0 else 0.0
+    # 점수 역산 (engine 로직과 100% 동일)
+    rsi_score = round(max(0.0, min(20.0, (60.0 - rsi) * 0.5)), 1)
+    mfi_score = round(max(0.0, min(20.0, (60.0 - mfi) * 0.5)), 1)
+    bb_ratio  = (curr_price / bb_lower) if bb_lower and bb_lower > 0 else 1.0
+    bb_score  = round(max(0.0, min(15.0, (1.05 - bb_ratio) * 300.0)), 1) if bb_ratio <= 1.05 else 0.0
+    if macd_diff > 0:
+        mb = min(8.0, (macd_diff_pct * 200.0) if macd_diff_pct and macd_diff_pct > 0 else min(8.0, abs(macd_diff) * 5.0))
+        macd_score = round(min(15.0, 7.0 + mb), 1)
+    else:
+        macd_score = 0.0
 
-    # 2. 명확한 Action 판정
+    ichi_score = 7.5
+    if ichi_a is not None and ichi_b is not None:
+        cloud_bot = min(ichi_a, ichi_b)
+        cloud_top = max(ichi_a, ichi_b)
+        ichi_score = 0.0
+        if curr_price < cloud_bot:
+            ichi_score = 12.0
+        elif curr_price < cloud_top:
+            ichi_score = 6.0
+        if ichi_a > ichi_b:
+            ichi_score = min(15.0, ichi_score + 3.0)
+        ichi_score = round(ichi_score, 1)
+
+    vwap_score = 7.5
+    if vwap and vwap > 0:
+        div = (vwap - curr_price) / vwap
+        vwap_score = round(min(15.0, div * 300.0), 1) if div > 0 else 0.0
+
     if final_score >= 70:
-        action = "🟢 [적극 매수 (BUY)]"
+        action  = "🟢 [적극 매수 (BUY)]"
         briefing = "완벽한 과매도 바닥 구간(RSI/MFI)과 추세 반전이 교집합을 이뤘습니다. 기관과 세력의 자금이 유입되는 징후가 포착되었습니다. 철저한 분할 매수로 물량을 확보하십시오."
     elif final_score <= 30:
-        action = "🔴 [매도 및 회피 (SELL)]"
+        action  = "🔴 [매도 및 회피 (SELL)]"
         briefing = "수급이 완전히 이탈했거나 고점 과열 상태입니다. 바닥 밑에 지하실이 열려있습니다. 보유자는 즉각 비중을 축소하고, 신규 진입은 절대 금지합니다."
     else:
-        action = "🟡 [보류 및 관망 (HOLD)]"
+        action  = "🟡 [보류 및 관망 (HOLD)]"
         briefing = "방향성을 상실한 혼조세 구간입니다. 가격은 횡보하고 수급은 애매합니다. 확실한 타점(70점 이상)이 나올 때까지 소중한 자본을 묶어두지 마십시오."
 
-    # 3. 마크다운 기반의 브리핑 텍스트 조립 (Streamlit st.markdown 줄바꿈: 줄 끝 공백 2개)
-    comment = f"**{action}**\n\n"
-    comment += "📊 **[The Closer's 총점 해부]**  \n"
-    comment += f"▪️ **RSI** (과매도 강도): **+{rsi_score}점** / 40점 만점  \n"
-    comment += f"▪️ **MFI** (세력 자금유입): **+{mfi_score}점** / 40점 만점  \n"
-    comment += f"▪️ **BB** (하단 지지력): **+{bb_score}점** / 10점 만점  \n"
-    comment += f"▪️ **MACD** (단기 추세): **+{macd_score}점** / 10점 만점"
+    stop_info = ""
+    if atr_val and atr_val > 0 and curr_price > 0:
+        dynamic_stop = max(curr_price - 2 * atr_val, curr_price * 0.85)
+        stop_pct = abs((dynamic_stop - curr_price) / curr_price * 100)
+        stop_info = f"  \n🛡️ **ATR 동적 손절선**: **{dynamic_stop:,.1f}** ({stop_pct:.1f}% below, 2×ATR 기준)"
+
+    comment  = f"**{action}**\n\n"
+    comment += "📊 **[The Closer's Multi-Factor 총점 해부]**  \n"
+    comment += f"▪️ **RSI** (과매도): **+{rsi_score}점** / 20점  \n"
+    comment += f"▪️ **MFI** (세력 자금): **+{mfi_score}점** / 20점  \n"
+    comment += f"▪️ **BB** (하단 지지력): **+{bb_score}점** / 15점  \n"
+    comment += f"▪️ **MACD** (추세 크기): **+{macd_score}점** / 15점  \n"
+    comment += f"▪️ **Ichimoku** (구름 위치): **+{ichi_score}점** / 15점  \n"
+    comment += f"▪️ **VWAP** (수급 구형): **+{vwap_score}점** / 15점"
 
     if fund_penalty > 0:
-        comment += f"  \n🚨 **재무 페널티**: **-{fund_penalty}점** 감점 (적자/부채/동전주)"
+        comment += f"  \n🚨 **재무 페널티**: **-{fund_penalty}점** (적자/부채/시총 미달)"
 
+    comment += stop_info
     comment += f"\n\n💡 **[월스트리트 퀀트 분석]**  \n{briefing}"
 
     return action, comment
@@ -289,8 +375,17 @@ def analyze_stock(ticker, period="6mo", apply_fundamental=False):
         bb_lower_val = bb_lower.iloc[-1]
         macd_diff_val = macd_diff.iloc[-1]
         
-        # 4. 고해상도 점수 계산
-        raw_tech_score = calculate_sharp_score(rsi_val, mfi_val, bb_lower_val, curr_price, macd_diff_val)
+        # 4. Multi-Factor 점수 계산 (v2 — 6팩터 독립 입력)
+        ichi_a_val = ichi_a.iloc[-1]
+        ichi_b_val = ichi_b.iloc[-1]
+        vwap_val   = vwap.iloc[-1]
+        atr_val    = atr.iloc[-1]
+        # MACD diff의 가격 대비 비율 (크기 정규화)
+        macd_pct = abs(macd_diff_val) / curr_price * 100.0 if curr_price > 0 else 0.0
+        raw_tech_score = calculate_sharp_score(
+            rsi_val, mfi_val, bb_lower_val, curr_price, macd_diff_val,
+            ichi_a=ichi_a_val, ichi_b=ichi_b_val, vwap=vwap_val, macd_diff_pct=macd_pct
+        )
 
         # 4-1. 기술 점수 확정 (펀더멘털 패널티는 detail_info 생성 후 적용)
         final_score = round(min(100.0, max(0.0, raw_tech_score)), 1)
@@ -328,8 +423,8 @@ def analyze_stock(ticker, period="6mo", apply_fundamental=False):
                 "full_comment": f"현재가 {('하단 근처' if curr_price <= bb_lower_val else '상단 근처' if curr_price >= bb_higher.iloc[-1] else '중간권역')} - 변동성: {'높음' if (bb_higher.iloc[-1] - bb_lower_val) > (close.mean() * 0.05) else '정상'}"
             },
             {
-                "title": "🎯 ATR (변동성 범위)",
-                "full_comment": "일중 변동성 계산 중..."
+                "title": "🎯 ATR (동적 손절선)",
+                "full_comment": f"ATR={atr_val:.2f} → 2×ATR 손절선: {max(curr_price - 2*atr_val, curr_price*0.85):,.1f} ({abs((max(curr_price-2*atr_val, curr_price*0.85)-curr_price)/curr_price*100):.1f}% below)"
             },
             {
                 "title": "🌊 VWAP (거래량 가중)",
@@ -356,9 +451,10 @@ def analyze_stock(ticker, period="6mo", apply_fundamental=False):
                 "full_comment": fund_combined_text
             })
 
-        # 🚨 [The Closer's 실시간 의견 교체]
+        # 🚨 [The Closer's 실시간 의견 교체 — Multi-Factor v2 파라미터 전달]
         short_verdict, full_wallstreet_comment = get_closer_verdict_and_comment(
-            final_score, rsi_val, mfi_val, curr_price, bb_lower_val, macd_diff_val, fund_penalty
+            final_score, rsi_val, mfi_val, curr_price, bb_lower_val, macd_diff_val, fund_penalty,
+            ichi_a=ichi_a_val, ichi_b=ichi_b_val, vwap=vwap_val, macd_diff_pct=macd_pct, atr_val=atr_val
         )
         verdict = short_verdict
         detail_info.append({
@@ -366,10 +462,16 @@ def analyze_stock(ticker, period="6mo", apply_fundamental=False):
             "full_comment": full_wallstreet_comment
         })
 
+        # [ATR 기반 동적 손절선] 2×ATR — 일괄 10% 고정 폐기
         try:
-            stop_loss = close.iloc[-1] * 0.90  # 10% 손절
+            atr_val_latest = atr.iloc[-1]
+            if atr_val_latest > 0:
+                stop_loss = round(curr_price - (2.0 * atr_val_latest), 2)
+                stop_loss = max(stop_loss, curr_price * 0.85)  # 하드 플로어: 최대 15% 이탈 방지
+            else:
+                stop_loss = curr_price * 0.90  # ATR 이상 시 폴백
         except:
-            stop_loss = 0
+            stop_loss = curr_price * 0.90
         
         # DataFrame에 모든 지표 추가
         df['rsi'] = rsi
