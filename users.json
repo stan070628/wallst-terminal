@@ -1,3 +1,8 @@
 {
-  "stan.lee": "070628card!"
+    "stan.lee": {
+        "password_hash": "730aa0b6652a810b3e919881fac59caf951da7cbe7460069498558ed2eeb389f",
+        "created_at": "2026-02-24T23:53:52.148264",
+        "last_login": null,
+        "is_active": true
+    }
 }
