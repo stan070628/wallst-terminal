@@ -23,36 +23,32 @@ except ImportError:
 
 def calculate_sharp_score(rsi, mfi, bb_lower, curr_price, macd_diff):
     """
-    추세 추종(Momentum) 중심의 현실적 점수 평정
-    저점 매수만이 아닌 '가는 놈이 더 가는' 추세 추종 로직으로 전환
+    [The Closer's 연속형(Continuous) 채점기]
+    계단식 배점을 폐기하고, 지표의 수치를 소수점까지 점수로 환산합니다.
+    단 하나의 동점자도 발생하지 않도록 0.1점 단위의 압도적 변별력을 부여합니다.
     """
-    base_score = 40  # 기본 점수: 보정치 (0이 아닌 40에서 시작)
-    multipliers = 1.0
-    
-    # 1. RSI (기준 완화: 30이하 → 40이하로 확대)
-    if rsi <= 40:
-        base_score += 30      # 과매도 기준 완화
-    elif rsi >= 70:
-        base_score -= 20      # 과매수 감점 유지
+    # 1. RSI Score (0~40점 만점): 선형 보간법 적용
+    # RSI가 60 이상이면 0점, 20 이하로 갈수록 40점 만점에 수렴
+    rsi_score = max(0.0, min(40.0, (60.0 - rsi) * 1.0))
 
-    # 2. MFI (수급 기준 완화: 20이하 → 40이하로 확대)
-    if mfi <= 40:
-        base_score += 15      # 자금 유입 신호
+    # 2. MFI Score (0~40점 만점): 자금 유입 강도
+    # MFI가 60 이상이면 0점, 20 이하로 갈수록 40점 만점
+    mfi_score = max(0.0, min(40.0, (60.0 - mfi) * 1.0))
 
-    # 3. 볼린저 밴드 (기존 유지)
-    if curr_price <= bb_lower:
-        base_score += 20      # BB 하단 돌파
-        if rsi <= 35:
-            multipliers += 0.5
+    # 3. Bollinger Band (0~10점): 하단 이탈 한계선 측정
+    # 하단선 대비 5% 이내(1.05) 진입 시부터 거리에 비례해 점수 부여 (딱 맞으면 10점)
+    bb_ratio = (curr_price / bb_lower) if bb_lower > 0 else 1.0
+    bb_score = 0.0
+    if bb_ratio <= 1.05:
+        bb_score = max(0.0, min(10.0, (1.05 - bb_ratio) * 200.0))
 
-    # 4. MACD (추세 가중치 강화: 10→20으로 상향, 승수 +0.3→+0.2로 변경)
-    if macd_diff > 0:
-        base_score += 20      # 추세 신호 가산점 대폭 상승
-        multipliers += 0.2    # 추세가 살아있으면 1.2배 가산
+    # 4. MACD (0 또는 10점): 추세 반전 여부
+    macd_score = 10.0 if macd_diff > 0 else 0.0
 
-    # 최종 점수 계산: 0~100점 제한
-    final_score = min(100, max(0, int(base_score * multipliers)))
-    
+    # 총합 연산 (소수점 첫째 자리까지만 살려서 강력한 변별력 확보)
+    raw_score = rsi_score + mfi_score + bb_score + macd_score
+    final_score = round(min(100.0, max(0.0, raw_score)), 1)
+
     return final_score
 
 @st.cache_data(ttl=300)
