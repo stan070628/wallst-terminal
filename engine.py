@@ -91,7 +91,7 @@ def check_fundamentals(ticker_obj):
 
     return penalty, messages
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def analyze_stock(ticker, period="6mo", apply_fundamental=False):
     """
     고해상도 타격 시스템: Convergence Weight 기반
@@ -141,7 +141,16 @@ def analyze_stock(ticker, period="6mo", apply_fundamental=False):
         low = df['Low'].astype(float)
         volume = df['Volume'].astype(float)
         
+        # 🚨 [The Closer's 실시간 현재가 보정]
+        # close.iloc[-1]은 전일 종가 → 장 중 조회 시 실제 주가와 불일치 발생
+        # fast_info.last_price로 오버라이드하여 항상 실제 현재가 표시
         curr_price = close.iloc[-1]
+        try:
+            live_price = stock.fast_info.last_price
+            if live_price and live_price > 0:
+                curr_price = float(live_price)
+        except Exception:
+            pass  # 실패 시 close.iloc[-1] 유지
         
         # 3. 지표 계산 (모든 지표를 계산하되, 없으면 안전하게 처리)
         try:
