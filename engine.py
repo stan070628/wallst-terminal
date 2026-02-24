@@ -1,7 +1,6 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import streamlit as st
 from datetime import datetime, timedelta
 
 try:
@@ -138,7 +137,6 @@ def get_closer_verdict_and_comment(final_score, rsi, mfi, curr_price, bb_lower, 
 
     return action, comment
 
-@st.cache_data(ttl=60)
 def analyze_stock(ticker, period="6mo", apply_fundamental=False):
     """
     고해상도 타격 시스템: Convergence Weight 기반
