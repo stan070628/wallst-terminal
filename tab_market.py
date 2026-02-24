@@ -24,8 +24,24 @@ def run_market_tab(unused_stock_dict):
 
     if st.button(f"🚀 {market_choice} 스캔 시작", use_container_width=True, type="primary"):
         results = []
-        items = list(target_market.items())[:max_scan]
-        
+
+        # [The Closer's 강력한 시장 필터링]
+        filtered_items = []
+        for name, code in target_market.items():
+            code_upper = code.upper()
+            # 1. KOSPI를 선택했는데 꼬리가 .KS가 아니면 가차없이 버림
+            if "KOSPI" in market_choice and not code_upper.endswith(".KS"):
+                continue
+            # 2. KOSDAQ을 선택했는데 꼬리가 .KQ가 아니면 가차없이 버림
+            elif "KOSDAQ" in market_choice and not code_upper.endswith(".KQ"):
+                continue
+            # 3. GLOBAL은 필터 없이 통과
+
+            filtered_items.append((name, code))
+
+        # 오염된 데이터를 걸러낸 순도 100%의 리스트로만 스캔 진행
+        items = filtered_items[:max_scan]
+
         prog = st.progress(0)
         status_text = st.empty()
         
