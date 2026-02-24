@@ -92,10 +92,11 @@ def check_fundamentals(ticker_obj):
     return penalty, messages
 
 @st.cache_data(ttl=300)
-def analyze_stock(ticker, period="6mo"):
+def analyze_stock(ticker, period="6mo", apply_fundamental=False):
     """
     고해상도 타격 시스템: Convergence Weight 기반
     여러 지표가 동시에 신호를 주면 점수 폭발 → 진정한 선별과 0점 남발 구분
+    apply_fundamental=True 시 재무 X-Ray 패널티 적용 (개별 분석 전용, 전수조사 시 False)
     """
     try:
         stock = yf.Ticker(ticker)
@@ -237,8 +238,11 @@ def analyze_stock(ticker, period="6mo"):
         # 4. 고해상도 점수 계산
         raw_tech_score = calculate_sharp_score(rsi_val, mfi_val, bb_lower_val, curr_price, macd_diff_val)
 
-        # 4-1. 재무 X-Ray 패널티 적용
-        fund_penalty, fund_messages = check_fundamentals(stock)
+        # 4-1. 재무 X-Ray 패널티 적용 (apply_fundamental=True 일 때만 실행)
+        fund_penalty = 0.0
+        fund_messages = []
+        if apply_fundamental:
+            fund_penalty, fund_messages = check_fundamentals(stock)
         final_score = round(min(100.0, max(0.0, raw_tech_score - fund_penalty)), 1)
 
         # 5. 판정 기준 (신뢰도 점수 해석법)
@@ -288,12 +292,13 @@ def analyze_stock(ticker, period="6mo"):
             {
                 "title": "⚡ 매매 신호 종합",
                 "full_comment": f"최종 판정: {verdict}"
-            },
-            {
-                "title": "🏦 재무 X-Ray",
-                "full_comment": " | ".join(fund_messages)
             }
         ]
+        if apply_fundamental:
+            detail_info.append({
+                "title": "🏦 재무 X-Ray",
+                "full_comment": " | ".join(fund_messages) if fund_messages else "재무 데이터 없음"
+            })
         
         try:
             stop_loss = close.iloc[-1] * 0.90  # 10% 손절
