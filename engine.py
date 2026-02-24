@@ -51,6 +51,46 @@ def calculate_sharp_score(rsi, mfi, bb_lower, curr_price, macd_diff):
 
     return final_score
 
+def check_fundamentals(ticker_obj):
+    """
+    [The Closer's X-Ray 필터]
+    재무제표가 썩은 한계기업을 찾아내어 패널티(감점) 폭탄을 투하합니다.
+    """
+    penalty = 0.0
+    messages = []
+    try:
+        info = ticker_obj.info
+
+        # [정상 참작] ETF, ETN, 코인은 재무제표가 없으므로 패스
+        if info.get('quoteType') in ['ETF', 'MUTUALFUND', 'CRYPTOCURRENCY'] or 'ETF' in info.get('shortName', ''):
+            return 0.0, ["💡 [자산 분류] ETF/펀드/암호화폐 (재무 검증 면제)"]
+
+        # 1. 동전주 검증 (1000원 미만)
+        current_price = info.get('currentPrice', info.get('regularMarketPrice', 0))
+        if current_price and current_price < 1000:
+            penalty += 30.0
+            messages.append("🚨 [치명적 경고] 주가 1,000원 미만 동전주 (상폐 위험, -30점 감점)")
+
+        # 2. 실적 검증 (EPS 마이너스 = 적자 기업)
+        eps = info.get('trailingEps', 0)
+        if eps is not None and eps < 0:
+            penalty += 20.0
+            messages.append("⚠️ [재무 경고] 최근 실적 지속 적자 (EPS 마이너스, -20점 감점)")
+
+        # 3. 빚쟁이 검증 (부채비율 200% 초과)
+        debt_equity = info.get('debtToEquity', 0)
+        if debt_equity is not None and debt_equity > 200:
+            penalty += 10.0
+            messages.append("⚠️ [부채 경고] 부채비율 200% 초과 (자본 잠식 우려, -10점 감점)")
+
+        if penalty == 0.0:
+            messages.append("✅ [재무 건전성] 펀더멘털 양호 (적자/자본잠식 징후 없음)")
+
+    except Exception:
+        messages.append("⚠️ 야후 파이낸스 재무 데이터 수신 불가 (정보 누락)")
+
+    return penalty, messages
+
 @st.cache_data(ttl=300)
 def analyze_stock(ticker, period="6mo"):
     """
@@ -195,8 +235,12 @@ def analyze_stock(ticker, period="6mo"):
         macd_diff_val = macd_diff.iloc[-1]
         
         # 4. 고해상도 점수 계산
-        final_score = calculate_sharp_score(rsi_val, mfi_val, bb_lower_val, curr_price, macd_diff_val)
-        
+        raw_tech_score = calculate_sharp_score(rsi_val, mfi_val, bb_lower_val, curr_price, macd_diff_val)
+
+        # 4-1. 재무 X-Ray 패널티 적용
+        fund_penalty, fund_messages = check_fundamentals(stock)
+        final_score = round(min(100.0, max(0.0, raw_tech_score - fund_penalty)), 1)
+
         # 5. 판정 기준 (신뢰도 점수 해석법)
         if final_score >= 80:
             verdict = "💎 [천재지변급 기회 - 분할 매수 즉시]"
@@ -244,6 +288,10 @@ def analyze_stock(ticker, period="6mo"):
             {
                 "title": "⚡ 매매 신호 종합",
                 "full_comment": f"최종 판정: {verdict}"
+            },
+            {
+                "title": "🏦 재무 X-Ray",
+                "full_comment": " | ".join(fund_messages)
             }
         ]
         
