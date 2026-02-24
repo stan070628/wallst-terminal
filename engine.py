@@ -67,7 +67,7 @@ def check_fundamentals(ticker_obj):
 
         # 1. 동전주 검증 (1000원 미만)
         current_price = info.get('currentPrice', info.get('regularMarketPrice', 0))
-        if current_price and current_price < 1000:
+        if current_price > 0 and current_price < 1000:
             penalty += 30.0
             messages.append("🚨 [치명적 경고] 주가 1,000원 미만 동전주 (상폐 위험, -30점 감점)")
 
