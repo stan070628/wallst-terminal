@@ -194,7 +194,7 @@ def run_scanner_tab(unused_stock_dict):
         progress_placeholder.info("🔄 분석 중... 데이터 수집 → 지표 계산 → 신호 생성")
         
         try:
-            result = analyze_stock(target_ticker)
+            result = analyze_stock(target_ticker, apply_fundamental=True)
             progress_placeholder.empty()
             
             if result:

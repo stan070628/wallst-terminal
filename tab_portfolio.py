@@ -33,7 +33,7 @@ def show_expert_popup(stock):
     apply_global_style() # 팝업 내 가독성 강제 적용
     
     # v5.0 엔진 규격 준수: 5개 변수 수령 및 Shape 오류 방어 완료
-    df, score, msg, details, stop_loss = analyze_stock(stock['ticker'])
+    df, score, msg, details, stop_loss = analyze_stock(stock['ticker'], apply_fundamental=True)
     
     if df is not None:
         curr_p = int(df['Close'].iloc[-1])
@@ -165,7 +165,7 @@ def show_rebalancing_analysis(my_stocks):
     with st.status("🚀 포트폴리오 정밀 해부 중...", expanded=True) as status:
         for stock in my_stocks:
             try:
-                df, score, msg, _, _ = analyze_stock(stock['ticker'])
+                df, score, msg, _, _ = analyze_stock(stock['ticker'], apply_fundamental=True)
                 if df is not None and score is not None:
                     # 원화 환산 처리: 글로벌(USD) 자산은 환율을 적용하여 KRW로 통일
                     curr_price = float(df['Close'].iloc[-1])
@@ -678,7 +678,7 @@ def run_portfolio_tab(unused_stock_dict):
             actual_idx = len(st.session_state.my_stocks) - 1 - idx
             with st.container(border=True):
                 try:
-                    result = analyze_stock(stock['ticker'])
+                    result = analyze_stock(stock['ticker'], apply_fundamental=True)
                     if result and result[0] is not None:
                         _, score, msg, _, _ = result
                     else:
