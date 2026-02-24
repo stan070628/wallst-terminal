@@ -100,28 +100,43 @@ def check_fundamentals(ticker_obj):
 
     return penalty, messages
 
-def get_closer_total_comment(final_score, rsi, mfi, macd_diff):
+def get_closer_verdict_and_comment(final_score, rsi, mfi, curr_price, bb_lower, macd_diff, fund_penalty=0.0):
     """
-    [The Closer's 총점 해설기]
-    단순한 점수를 넘어, 지표 간의 괴리를 분석하고 냉혹한 트레이딩 전략을 하달합니다.
+    [The Closer's 실시간 의견 생성기]
+    명확한 Action(매수/매도/보류)을 하달하고, 점수의 근거를 낱낱이 해부합니다.
     """
-    is_trend_good = macd_diff > 0
-    is_overheated = rsi >= 60 or mfi >= 60
+    # 1. 뼈대가 되는 기술적 점수 역산 (엔진 로직과 100% 동일하게 표시)
+    rsi_score = round(max(0.0, min(40.0, (60.0 - rsi) * 1.0)), 1)
+    mfi_score = round(max(0.0, min(40.0, (60.0 - mfi) * 1.0)), 1)
+    bb_ratio = (curr_price / bb_lower) if bb_lower > 0 else 1.0
+    bb_score = round(max(0.0, min(10.0, (1.05 - bb_ratio) * 200.0)), 1) if bb_ratio <= 1.05 else 0.0
+    macd_score = 10.0 if macd_diff > 0 else 0.0
 
-    if final_score < 30:
-        if is_trend_good and is_overheated:
-            return "🚨 [추격 매수 경고] 굵은 상승 추세(MACD)는 살아있으나, 단기 지표(RSI/MFI)가 과열되어 '진입 타점'이 붕괴된 상태입니다. 10~20점대의 낮은 점수는 '종목이 쓰레기'라는 뜻이 아니라, '지금 사면 고점에 물리니 눌림목(Pushback Buy)까지 인내하라'는 시스템의 강력한 통제입니다."
-        else:
-            return "🛑 [절대 관망] 추세가 하방으로 꺾였고 수급마저 말라붙은 죽은 차트입니다. 바닥 밑에 지하실이 있습니다. 굳이 떨어지는 칼날에 소중한 자본을 투입할 이유가 없습니다."
-
-    elif final_score >= 70:
-        if is_trend_good:
-            return "💎 [천재지변급 기회] 상승 추세를 올라탄 상태에서 완벽한 눌림목(단기 과매도) 타점까지 형성되었습니다. 펀더멘털에 치명적 결함만 없다면 망설임 없이 분할 매수를 시작하십시오."
-        else:
-            return "🔪 [낙폭과대 반등 타겟] 거시적 추세는 역배열 하락장이지만, 단기적으로 피가 낭자한 '극한의 과매도' 바닥권에 진입했습니다. 기술적 반등(Dead Cat Bounce)을 노리는 짧은 트레이딩 타점으로 유효합니다."
-
+    # 2. 명확한 Action 판정
+    if final_score >= 70:
+        action = "🟢 [적극 매수 (BUY)]"
+        briefing = "완벽한 과매도 바닥 구간(RSI/MFI)과 추세 반전이 교집합을 이뤘습니다. 기관과 세력의 자금이 유입되는 징후가 포착되었습니다. 철저한 분할 매수로 물량을 확보하십시오."
+    elif final_score <= 30:
+        action = "🔴 [매도 및 회피 (SELL)]"
+        briefing = "수급이 완전히 이탈했거나 고점 과열 상태입니다. 바닥 밑에 지하실이 열려있습니다. 보유자는 즉각 비중을 축소하고, 신규 진입은 절대 금지합니다."
     else:
-        return "⚠️ [방향성 부재] 지표들이 혼조세를 보이며 명확한 타점을 주지 않는 횡보/애매한 구간입니다. 불확실성에 배팅하지 마십시오. 80점 이상의 확실한 대장주를 찾아 레이더를 다시 돌리십시오."
+        action = "🟡 [보류 및 관망 (HOLD)]"
+        briefing = "방향성을 상실한 혼조세 구간입니다. 가격은 횡보하고 수급은 애매합니다. 확실한 타점(70점 이상)이 나올 때까지 소중한 자본을 묶어두지 마십시오."
+
+    # 3. 마크다운 기반의 브리핑 텍스트 조립
+    comment = f"**{action}**\n\n"
+    comment += "📊 **[The Closer's 총점 해부]**\n"
+    comment += f"▪️ **RSI** (과매도 강도): **+{rsi_score}점** / 40점 만점\n"
+    comment += f"▪️ **MFI** (세력 자금유입): **+{mfi_score}점** / 40점 만점\n"
+    comment += f"▪️ **BB** (하단 지지력): **+{bb_score}점** / 10점 만점\n"
+    comment += f"▪️ **MACD** (단기 추세): **+{macd_score}점** / 10점 만점\n"
+
+    if fund_penalty > 0:
+        comment += f"🚨 **재무 페널티**: **-{fund_penalty}점** 감점 (적자/부채/동전주)\n"
+
+    comment += f"\n💡 **[월스트리트 퀀트 분석]**\n{briefing}"
+
+    return action, comment
 
 @st.cache_data(ttl=60)
 def analyze_stock(ticker, period="6mo", apply_fundamental=False):
@@ -331,7 +346,7 @@ def analyze_stock(ticker, period="6mo", apply_fundamental=False):
                 "full_comment": f"최종 판정: {verdict}"
             }
         ]
-        # 🚨 [The Closer's 펀더멘털 X-Ray 검증 실행]
+        # 🚨 [The Closer's 펀더멘털 검증]
         fund_penalty = 0.0
         fund_msgs = []
         if apply_fundamental:
@@ -343,11 +358,14 @@ def analyze_stock(ticker, period="6mo", apply_fundamental=False):
                 "full_comment": fund_combined_text
             })
 
-        # 🚨 [The Closer's 총점 전문가 코멘트 추가]
-        total_expert_verdict = get_closer_total_comment(final_score, rsi_val, mfi_val, macd_diff_val)
+        # 🚨 [The Closer's 실시간 의견 교체]
+        short_verdict, full_wallstreet_comment = get_closer_verdict_and_comment(
+            final_score, rsi_val, mfi_val, curr_price, bb_lower_val, macd_diff_val, fund_penalty
+        )
+        verdict = short_verdict
         detail_info.append({
-            "title": "💡 The Closer's 총점 브리핑",
-            "full_comment": total_expert_verdict
+            "title": "🎯 The Closer's 실시간 의견",
+            "full_comment": full_wallstreet_comment
         })
 
         try:
