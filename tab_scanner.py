@@ -250,31 +250,31 @@ def run_scanner_tab(unused_stock_dict):
                         <div class='metric-value' style='font-size: 2.5rem;'>{level_color}</div>
                         </div>""", unsafe_allow_html=True)
                     
-                    # 🔥 [신규] 상단 종합 요약: 전문가의 핵심 의견 1-2문장
+                    # ---------------------------------------------------------
+                    # 엔진(engine.py)이 보내준 진짜 퀀트 리포트를 details에서 추출해 출력
+                    # ---------------------------------------------------------
                     st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
                     
-                    if score >= 75:
-                        recommendation = "💎 **매수 강력 추천**: 모든 기술지표가 동의하고 있습니다. 적극적인 매수 타이밍입니다."
-                        summary_style = "background-color: rgba(0, 200, 100, 0.1); border-left: 5px solid #00c864;"
-                    elif score >= 60:
-                        recommendation = "✅ **매수 추천**: 주요 기술지표가 긍정 신호를 보이고 있습니다. 단, 과열 신호 확인 후 진입하세요."
-                        summary_style = "background-color: rgba(0, 180, 100, 0.1); border-left: 5px solid #34c759;"
-                    elif score >= 50:
-                        recommendation = "⚖️ **보류 (관망)**: 기술지표 신호가 엇갈리고 있습니다. 더 명확한 방향성 확인 후 진입하세요."
-                        summary_style = "background-color: rgba(255, 150, 0, 0.1); border-left: 5px solid #ff9500;"
-                    elif score >= 35:
-                        recommendation = "⚠️ **매도 주의**: 단기적 과열 또는 약세 신호가 주도합니다. 기존 보유 종목은 수익실현을 고려하세요."
-                        summary_style = "background-color: rgba(255, 100, 100, 0.1); border-left: 5px solid #ff6b6b;"
-                    else:
-                        recommendation = "🛑 **회피 권장**: 명확한 하락 신호가 우세합니다. 조건이 개선될 때까지 대기하세요."
-                        summary_style = "background-color: rgba(255, 59, 48, 0.1); border-left: 5px solid #ff3b30;"
+                    closer_opinion = None
+                    fund_opinion = None
                     
-                    st.markdown(f"""
-                    <div style='{summary_style}; padding: 15px; border-radius: 8px;'>
-                    <h3 style='margin-top: 0; color: white;'>🎯 The Closer's 실시간 의견</h3>
-                    <p style='font-size: 1.05rem; color: #e0e0e0;'>{recommendation}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    for info in details:
+                        if "The Closer's 실시간 의견" in info["title"]:
+                            closer_opinion = info["full_comment"]
+                        elif "펀더멘털 검증" in info["title"]:
+                            fund_opinion = info.get("full_comment") or info.get("comment", "")
+                    
+                    # 1. 재무 엑스레이 결과 (치명적 결함이 있을 때만 경고)
+                    if fund_opinion:
+                        st.error(f"**🏢 펀더멘털(재무) 검증:** {fund_opinion}", icon="🚨")
+                        st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
+                    
+                    # 2. 월스트리트 퀀트 브리핑 (마크다운 완벽 지원)
+                    if closer_opinion:
+                        st.info(closer_opinion, icon="🎯")
+                    else:
+                        st.warning(f"💡 전문가 코멘트: {msg}")
+                    # ---------------------------------------------------------
                     
                     # AI 판정
                     st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
@@ -434,21 +434,6 @@ def run_scanner_tab(unused_stock_dict):
                         st.plotly_chart(fig_vol, use_container_width=True)
                     
                     st.write("---")
-                    
-                    # 종합 결론
-                    st.markdown("### ⚡ 매매 신호 종합 결론")
-                    
-                    if score >= 80:
-                        st.success(f"최종 판정: 💎 {msg}")
-                        st.markdown("> **🔥 The Closer's 최종 지령:** 모든 신호가 녹불입니다. 이것은 '자신 있는 매수 구간'입니다. 물론 충분한 자금 관리(포지션 사이징) 하에 말입니다.")
-                    elif score >= 50:
-                        st.warning(f"최종 판정: ⚠️ {msg}")
-                        st.markdown("> **🔥 The Closer's 최종 지령:** 거시적 추세는 위를 보지만, 단기 지표가 과열/약세 신호를 띠고 있습니다. 1차 押し目(하락 추세 중 단기 반등)을 노리거나, 재진입 신호(추세 재확인)을 기다리십시오.")
-                    else:
-                        st.error(f"최종 판정: 🛑 {msg}")
-                        st.markdown("> **🔥 The Closer's 최종 지령:** 신호가 명확하지 않거나 하락 신호가 우세합니다. 지금은 관망 구간입니다. 더 명확한 바닥권 신호(RSI <30 + VWAP 돌파 + MFI 상승)를 기다리십시오.")
-                    
-                    st.markdown("---")
                     
                 else:
                     st.error(f"❌ '{target_ticker}' 엔진 분석 실패")
