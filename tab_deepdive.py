@@ -247,61 +247,27 @@ def render_deepdive_analysis(df, score, core_msg, details, stop_loss_price, tick
 
     # --- ⚡ 최종 종합 결론 ---
     st.markdown("### ⚡ 최종 매매 판정")
-    
-    if score >= 80:
-        st.success(f"✅ **최종 판정**: {core_msg}")
-        st.markdown("""
-**🔥 매수 신호 - 가장 강한 신호**
 
-모든 지표가 "매수하세요" 신호를 보내고 있습니다.
-- 단기 추진력 ✅
-- 중기 추세 ✅  
-- 변동성과 가격 위치 ✅
-- 거래량과 기관 자금 ✅
+    # details 리스트에서 'The Closer's 실시간 의견' 항목 추출
+    closer_verdict_item = next((d for d in details if "실시간 의견" in d.get("title", "")), None)
 
-**할 일**: 자금 관리를 철저히 한 후, 이 구간에서 매수를 집중하세요. 
-        """)
-    elif score >= 60:
-        st.warning(f"⚠️ **최종 판정**: {core_msg}")
-        st.markdown("""
-**🟡 관망 또는 분할 매수 - 신호가 혼합됨**
-
-일부 지표는 강하지만 다른 지표는 약한 상황입니다.
-- 추세가 명확한가? 다시 확인하세요.
-- 거래량이 뒷받침 되는가? 확인하세요.
-
-**할 일**: 
-1) 약한 신호가 강해질 때까지 기다리거나
-2) 조금만 매수하고 추가 상승 신호 대기하기
-가 현명합니다.
-        """)
-    elif score >= 40:
-        st.warning(f"⚠️ **최종 판정**: {core_msg}")
-        st.markdown("""
-**🟠 신중 - 신호가 약함**
-
-현재는 매수하기엔 신호가 약합니다.
-- 여러 지표가 "기다려" 신호 중입니다.
-
-**할 일**: 
-1) 더 명확한 반등 신호 대기 (RSI <30에서 회복, 거래량 증가)
-2) 현재 보유 중이라면 손절가 설정 필수
-        """)
+    if closer_verdict_item:
+        full_comment = closer_verdict_item["full_comment"]
+        if score >= 70:
+            st.success(f"**The Closer 종합 점수: {score}점**")
+        elif score <= 30:
+            st.error(f"**The Closer 종합 점수: {score}점**")
+        else:
+            st.warning(f"**The Closer 종합 점수: {score}점**")
+        st.markdown(full_comment)
     else:
-        st.error(f"🛑 **최종 판정**: {core_msg}")
-        st.markdown("""
-**🔴 매도 신호 - 가장 약한 신호**
-
-지표들이 하락 또는 약세를 보이고 있습니다.
-- 단기/중기 추세 모두 약함
-- 거래량 부족
-- 기관 자금 이탈 신호
-
-**할 일**: 
-1) 신규 매수 금지
-2) 현재 보유 중이라면 손절 고려
-3) 명확한 반전 신호(바닥권 신호들) 대기
-        """)
+        # fallback: details 없을 경우 기존 방식
+        if score >= 80:
+            st.success(f"✅ **최종 판정**: {core_msg}")
+        elif score >= 50:
+            st.warning(f"⚠️ **최종 판정**: {core_msg}")
+        else:
+            st.error(f"🛑 **최종 판정**: {core_msg}")
 
     st.markdown("---")
 
