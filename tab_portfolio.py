@@ -81,10 +81,29 @@ def show_expert_popup(stock):
         else:
             st.caption(f"보유수량: {quantity:,}주 | 총 투자금: ₩{int(total_buy):,}")
         
-        # [고도화] 수치와 의미가 결합된 딥 뷰 출력
-        st.write("### 📊 기술지표 분석")
-        for item in details:
-            st.markdown(f"📍 **{item['title']}**<br><span style='font-size:0.85rem; color:#8e8e93;'>{item['full_comment']}</span>", unsafe_allow_html=True)
+        # ---------------------------------------------------------
+        # 엔진 details에서 진짜 퀀트 리포트 추출 후 강조 출력
+        # ---------------------------------------------------------
+        closer_opinion = None
+        fund_opinion = None
+        for info in details:
+            if "The Closer's 실시간 의견" in info.get("title", ""):
+                closer_opinion = info.get("full_comment", "")
+            elif "펀더멘털 검증" in info.get("title", ""):
+                fund_opinion = info.get("full_comment") or info.get("comment", "")
+        
+        if fund_opinion:
+            st.error(f"**🏢 펀더멘털(재무) 검증:** {fund_opinion}", icon="🚨")
+        if closer_opinion:
+            st.info(closer_opinion, icon="🎯")
+        # ---------------------------------------------------------
+        
+        # 기술지표 전체 딥 뷰 (접기 가능하도록 expander 처리)
+        with st.expander("📊 기술지표 전체 분석 보기", expanded=False):
+            for item in details:
+                if "실시간 의견" in item.get("title", ""):
+                    continue  # 이미 위에서 출력했으므로 스킵
+                st.markdown(f"📍 **{item['title']}**<br><span style='font-size:0.85rem; color:#8e8e93;'>{item['full_comment']}</span>", unsafe_allow_html=True)
         
         # 🎯 [신규] 기술지표 차트 렌더링
         st.write("### 📈 가격 추이 & 지표 시각화")
