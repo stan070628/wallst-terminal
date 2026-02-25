@@ -3,9 +3,22 @@ import re
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from engine import analyze_stock
+from pattern_finder import find_similar_patterns
 from market_data import get_all_krx_stocks
 from style_utils import apply_global_style
 from stocks import STOCK_DICT
+
+# ─────────────────────────────────────────────
+# [역방향 매핑] 코드 → 종목명 변환 유틸리티 (검색 속도 최적화)
+# ─────────────────────────────────────────────
+TICKER_TO_NAME_MAP = {}
+for mkt, stocks in STOCK_DICT.items():
+    for name, code in stocks.items():
+        TICKER_TO_NAME_MAP[code] = name
+
+def get_name_from_ticker(ticker_code):
+    """티커(코드)를 입력하면 종목명을 반환, 없으면 코드 그대로 반환"""
+    return TICKER_TO_NAME_MAP.get(ticker_code, ticker_code)
 
 def _find_ticker_from_name(user_input):
     """한글 이름으로 종목 찾기 (모든 시장 검색)"""
@@ -140,6 +153,7 @@ def run_scanner_tab(unused_stock_dict):
             target_ticker = "229200.KS"
             target_name = "KODEX 코스닥150"
     else:
+        target_name = None  # 글로벌 분기 초기화
         user_input_global = st.text_input(
             "💱 종목명, 6자리 코드, 또는 코인명",
             value="AAPL",
@@ -169,17 +183,36 @@ def run_scanner_tab(unused_stock_dict):
         if not ticker and ("-KRW" in clean_input or "-USD" in clean_input):
             ticker = clean_input
 
-        # 2단계: 숫자 6자리 → 한국 주식/ETF
+        # 2단계: 숫자 6자리 → 지능형 티커 분류기 (KOSPI/KOSDAQ 자동 판별)
         if not ticker:
             numbers_only = re.sub(r'[^0-9]', '', clean_input)
             if len(numbers_only) == 6:
-                ticker = f"{numbers_only}.KS"
+                # 🎯 STOCK_DICT에서 해당 코드가 어느 시장에 있는지 역추적하여 정확한 티커 확정
+                found_ticker = None
+                found_name = None
+
+                for market, stocks in STOCK_DICT.items():
+                    for name, code in stocks.items():
+                        if numbers_only in code:
+                            found_ticker = code
+                            found_name = name
+                            break
+                    if found_ticker:
+                        break
+
+                if found_ticker:
+                    ticker = found_ticker
+                    target_name = f"{found_name} ({ticker})"
+                else:
+                    # 사전에 없는 경우에만 기본값 부여
+                    ticker = f"{numbers_only}.KS"
             else:
                 # 영어 알파벳 → 미국 주식 티커 그대로
                 ticker = clean_input if clean_input else "AAPL"
 
         target_ticker = ticker
-        target_name = f"{user_input_global.strip()} ({target_ticker})" if user_input_global.strip() else target_ticker
+        if not target_name:
+            target_name = f"{user_input_global.strip()} ({target_ticker})" if user_input_global.strip() else target_ticker
 
     with col_input2:
         pass
@@ -195,12 +228,17 @@ def run_scanner_tab(unused_stock_dict):
         
         try:
             result = analyze_stock(target_ticker, apply_fundamental=True)
+
+            # 🚨 엔진이 None DataFrame을 뱉었을 경우 — 재무제표 제외 후 1회 재시도
+            if result[0] is None or (hasattr(result[0], 'empty') and result[0].empty):
+                result = analyze_stock(target_ticker, apply_fundamental=False)
+
             progress_placeholder.empty()
             
             if result:
                 df, score, msg, details, stop_loss = result
                 
-                if df is not None:
+                if df is not None and not df.empty:
                     # 신뢰도 레벨 결정
                     if score >= 75:
                         score_badge = f"<span class='score-badge-excellent'>{score}점 🔥</span>"
@@ -299,6 +337,29 @@ def run_scanner_tab(unused_stock_dict):
                     # --- 1️⃣ [엔진 온도] 모멘텀 및 과열 진단 ---
                     st.markdown("#### 1️⃣ [엔진 온도] 모멘텀 및 과열 진단")
                     st.caption("주가가 얼마나 가파르게 올랐는지, 단기적인 피로도와 돈의 흐름을 측정합니다.")
+                    
+                    # 🚨 detail_info에서 RSI Hook 상태를 추출
+                    rsi_hook_comment = None
+                    for info in details:
+                        if "턴어라운드" in info["title"] or "Hook" in info["title"]:
+                            rsi_hook_comment = info["full_comment"]
+                            break
+                    
+                    # RSI Hook 경고가 있으면 상단에 눈에 띄게 박아넣기
+                    if rsi_hook_comment and "실패" in rsi_hook_comment:
+                        st.markdown(
+                            f"<div style='background: rgba(255,59,48,0.15); border-left: 5px solid #ff3b30; "
+                            f"padding: 12px 16px; border-radius: 8px; margin-bottom: 12px;'>"
+                            f"<b>🪝 RSI 턴어라운드 (Hook) 필터:</b> {rsi_hook_comment}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    elif rsi_hook_comment:
+                        st.markdown(
+                            f"<div style='background: rgba(76,217,100,0.1); border-left: 5px solid #4cd964; "
+                            f"padding: 12px 16px; border-radius: 8px; margin-bottom: 12px;'>"
+                            f"<b>🪝 RSI 턴어라운드 (Hook):</b> {rsi_hook_comment}</div>",
+                            unsafe_allow_html=True,
+                        )
                     
                     left_col, right_col = st.columns([1.2, 1])
                     
@@ -405,6 +466,28 @@ def run_scanner_tab(unused_stock_dict):
                     st.markdown("#### 4️⃣ [기관의 지문] 수급 및 거래량 프로파일")
                     st.caption("거대 자본의 평단가와 그들이 쌓아놓은 매물대의 두께를 해부합니다.")
                     
+                    # 🚨 detail_info에서 120일선 폭포수 상태를 추출
+                    waterfall_comment = None
+                    for info in details:
+                        if "120일선" in info["title"] or "장기 추세" in info["title"]:
+                            waterfall_comment = info["full_comment"]
+                            break
+                    
+                    if waterfall_comment and "위험" in waterfall_comment:
+                        st.markdown(
+                            f"<div style='background: rgba(255,59,48,0.15); border-left: 5px solid #ff3b30; "
+                            f"padding: 12px 16px; border-radius: 8px; margin-bottom: 12px;'>"
+                            f"<b>📉 장기 추세 (120일선) 필터:</b> {waterfall_comment}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    elif waterfall_comment:
+                        st.markdown(
+                            f"<div style='background: rgba(76,217,100,0.1); border-left: 5px solid #4cd964; "
+                            f"padding: 12px 16px; border-radius: 8px; margin-bottom: 12px;'>"
+                            f"<b>📉 장기 추세 (120일선):</b> {waterfall_comment}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    
                     left_col, right_col = st.columns([1.2, 1])
                     
                     with left_col:
@@ -432,8 +515,69 @@ def run_scanner_tab(unused_stock_dict):
                                                     line=dict(color='#ffa500')), secondary_y=True)
                         fig_vol.update_layout(height=250, margin=dict(l=0, r=0, t=20, b=0), hovermode='x unified')
                         st.plotly_chart(fig_vol, use_container_width=True)
-                    
-                    st.write("---")
+
+                    # ... (기존 The Closer's 최종 판정 및 기술지표 분석 출력 코드들) ...
+
+                    st.markdown("---")
+
+                    # 🚨 [신규 기능] AI 프랙탈 패턴 예측 (도플갱어 추적)
+                    st.markdown("### 🔮 [AI 차트 예측] 과거 프랙탈 패턴 분석")
+                    st.caption(f"현재 {target_name}의 최근 20일 차트 궤적과 가장 똑같이 생긴 과거의 순간들을 찾아내어 미래를 예측합니다.")
+
+                    with st.spinner("⏳ 과거 3년 치 빅데이터 스캔 및 패턴 대조 중..."):
+                        pattern_result, p_msg = find_similar_patterns(target_ticker, lookback_days=20, future_days=[20, 60], top_n=3)
+
+                    if pattern_result:
+                        matches = pattern_result['top_matches']
+                        best_match = matches[0]
+                        avg_20 = pattern_result['avg_ret_20']
+                        avg_60 = pattern_result['avg_ret_60']
+
+                        # 요약 카드 출력
+                        pred_color_20 = "#ff3b30" if avg_20 > 0 else "#4cd964"
+                        pred_arrow_20 = "📈 상승" if avg_20 > 0 else "📉 하락"
+
+                        st.markdown(f"""
+                        <div style='background: linear-gradient(135deg, #1e1e1e 0%, #2a2a2a 100%); padding: 20px; border-radius: 12px; border-left: 5px solid #ff9500;'>
+                            <h4 style='margin-top:0;'>🎯 종합 예측: 현재 패턴은 과거 평균적으로 <span style='color:{pred_color_20};'>1개월 뒤 {avg_20:+.2f}% {pred_arrow_20}</span>했습니다.</h4>
+                            <p style='color:#aaaaaa; margin-bottom:0;'>과거에 이와 유사한 궤적을 그렸던 상위 3번의 케이스를 분석한 통계적 결과입니다. (신뢰도 보조 지표로만 활용하십시오)</p>
+                        </div>
+                        <br>
+                        """, unsafe_allow_html=True)
+
+                        # 상위 3개 패턴 상세 결과
+                        c1, c2, c3 = st.columns(3)
+                        cols = [c1, c2, c3]
+
+                        for i, match in enumerate(matches):
+                            sim_score = match['similarity']
+                            start_d = match['start_date']
+                            end_d = match['end_date']
+                            ret20 = match['ret_20']
+                            ret60 = match['ret_60']
+
+                            with cols[i]:
+                                st.markdown(f"""
+                                <div style='border:1px solid #444; padding:15px; border-radius:8px; text-align:center;'>
+                                    <div style='color:#ff9500; font-weight:bold; font-size:1.1rem;'>🥇 싱크로율 {sim_score:.1f}%</div>
+                                    <div style='color:#888; font-size:0.9rem; margin:10px 0;'>{start_d} ~ {end_d}</div>
+                                    <hr style='border-color:#444;'>
+                                    <div style='display:flex; justify_content:space-between; margin-top:10px;'>
+                                        <div style='width:50%;'>
+                                            <div style='font-size:0.8rem; color:#aaa;'>1개월 후</div>
+                                            <div style='font-weight:bold; color:{"#ff3b30" if ret20>0 else "#4cd964"};'>{ret20:+.1f}%</div>
+                                        </div>
+                                        <div style='width:50%;'>
+                                            <div style='font-size:0.8rem; color:#aaa;'>3개월 후</div>
+                                            <div style='font-weight:bold; color:{"#ff3b30" if ret60>0 else "#4cd964"};'>{ret60:+.1f}%</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                    else:
+                        st.warning(f"⚠️ 패턴 스캔 실패: {p_msg}")
+
+                    st.markdown("---")
                     
                 else:
                     st.error(f"❌ '{target_ticker}' 엔진 분석 실패")
