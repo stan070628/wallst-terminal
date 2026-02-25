@@ -3,4 +3,4 @@ yfinance
 ta
 plotly
 pandas
-extra-streamlit-components
+extra-streamlit-componentsrequests
