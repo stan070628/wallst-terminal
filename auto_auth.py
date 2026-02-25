@@ -33,7 +33,12 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 # 설정 상수
 # ─────────────────────────────────────────────
-_SECRET_KEY  = os.environ.get("SESSION_SECRET", "aibox_hmac_2026_!@#$")
+# [Security Fix] 하드코딩된 Secret 제거. 환경변수가 없으면 매번 랜덤 생성 (재시작 시 세션 만료됨)
+_SECRET_KEY  = os.environ.get("SESSION_SECRET")
+if not _SECRET_KEY:
+    _SECRET_KEY = secrets.token_hex(32)
+    logger.warning("⚠️ SESSION_SECRET not found in env. Generated temporary random key.")
+
 _SESSION_FILE = os.environ.get("SESSION_FILE", "auto_sessions.json")
 _TOKEN_TTL_HOURS = int(os.environ.get("SESSION_TTL_HOURS", "72"))   # 기본 3일
 

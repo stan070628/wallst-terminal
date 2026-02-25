@@ -73,8 +73,8 @@ def validate_password(password: str) -> Tuple[bool, str]:
 
 def hash_password(password: str) -> str:
     """SHA256으로 비밀번호를 해싱합니다 (Salt 포함)"""
-    # Salt는 사용자 ID의 처음 8자 + 고정 값
-    salt = "aibox_2026"
+    # 환경변수 AUTH_SALT 우선, 없으면 기존 호환성 유지용 기본값 사용
+    salt = os.environ.get("AUTH_SALT", "aibox_2026")
     hashed = hashlib.sha256((salt + password).encode()).hexdigest()
     return hashed
 

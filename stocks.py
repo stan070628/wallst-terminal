@@ -1,6 +1,71 @@
 # The Closer's Master Stock List — 검증된 종목만 수록
 # yfinance 티커 기준. 잘못된 티커는 전수조사/검색 오류 원인이 됨.
 
+import logging as _logging
+
+_log = _logging.getLogger(__name__)
+
+
+def get_all_tickers(market_type: str) -> list:
+    """
+    [The Closer's 실시간 시장 전수조사 엔진]
+    FinanceDataReader를 사용하여 지정 시장의 ***전 종목*** 티커를 실시간으로 가져옵니다.
+
+    Parameters
+    ----------
+    market_type : str
+        "KOSPI", "KOSDAQ", "GLOBAL", "ALL" 중 택 1
+
+    Returns
+    -------
+    list[tuple[str, str]]  — (종목명, yfinance 호환 티커) 페어 리스트
+    """
+    try:
+        import FinanceDataReader as fdr
+
+        if market_type == "KOSPI":
+            df = fdr.StockListing("KOSPI")
+            return [(row["Name"], f"{row['Code']}.KS") for _, row in df.iterrows()]
+
+        elif market_type == "KOSDAQ":
+            df = fdr.StockListing("KOSDAQ")
+            return [(row["Name"], f"{row['Code']}.KQ") for _, row in df.iterrows()]
+
+        elif market_type == "GLOBAL":
+            # S&P500 + 나스닥 상위 200 (대표성 있는 글로벌 타겟)
+            sp500 = fdr.StockListing("S&P500")
+            nasdaq = fdr.StockListing("NASDAQ").head(200)
+            pairs = []
+            for _df in (sp500, nasdaq):
+                for _, row in _df.iterrows():
+                    sym = row.get("Symbol") or row.get("Code", "")
+                    name = row.get("Name", sym)
+                    if sym:
+                        pairs.append((name, sym))
+            # 중복 제거 (티커 기준)
+            seen = set()
+            unique = []
+            for n, t in pairs:
+                if t not in seen:
+                    seen.add(t)
+                    unique.append((n, t))
+            return unique
+
+        elif market_type == "ALL":
+            return (
+                get_all_tickers("KOSPI")
+                + get_all_tickers("KOSDAQ")
+                + get_all_tickers("GLOBAL")
+            )
+
+    except Exception as exc:
+        _log.warning("get_all_tickers(%s) 실패: %s — 수동 리스트로 폴백", market_type, exc)
+
+    # 폴백: 수동 리스트에서 (이름, 티커) 페어 추출
+    fallback = STOCK_DICT.get(market_type, {})
+    return list(fallback.items()) if fallback else []
+
+
 STOCK_DICT = {
     # ========== KOSPI ==========
     "KOSPI": {
