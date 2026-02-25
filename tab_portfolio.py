@@ -36,33 +36,46 @@ def show_expert_popup(stock):
     df, score, msg, details, stop_loss = analyze_stock(stock['ticker'], apply_fundamental=True)
     
     if df is not None:
-        curr_p = int(df['Close'].iloc[-1])
+        curr_p = float(df['Close'].iloc[-1])  # yfinance 원본가 (USD 종목은 USD, KRW 종목은 KRW)
         quantity = stock.get('quantity', 0)
-        buy_price = stock.get('buy_price', 0)
+        buy_price = stock.get('buy_price', 0)  # 저장된 값 (USD 종목은 원화로 저장됨)
         currency = stock.get('currency', 'KRW')
         exchange_rate = stock.get('exchange_rate', 1.0)
         
-        # 원화/달러 통일
-        total_buy = buy_price * quantity
-        total_val = curr_p * quantity
-        profit = ((curr_p - buy_price) / buy_price) * 100 if buy_price > 0 else 0
+        # 🚨 [The Closer's 수익률 계산 수정]
+        # 외화 주식은 먼저 USD 기준으로 통일해서 계산한 뒤, 마지막에 화면 표시용으로만 원화 환산
+        if currency == "USD":
+            # USD 기준 계산
+            buy_price_usd = buy_price / exchange_rate  # 저장된 원화 → USD
+            curr_p_usd = curr_p  # yfinance에서 가져온 값은 이미 USD
+            
+            # USD 기준 총액
+            invest_usd = buy_price_usd * quantity
+            eval_usd = curr_p_usd * quantity
+            
+            # 수익률 계산 (USD 기준)
+            profit = ((eval_usd - invest_usd) / invest_usd) * 100 if invest_usd > 0 else 0
+            
+            # 화면 표시용 원화 환산
+            total_buy = invest_usd * exchange_rate  # 총 투자금 (KRW)
+            total_val = eval_usd * exchange_rate    # 평가금액 (KRW)
+            total_buy_usd = invest_usd
+            total_val_usd = eval_usd
+            currency_symbol = "$"
+        else:
+            # KRW 종목은 그대로
+            total_buy = buy_price * quantity
+            total_val = curr_p * quantity
+            profit = ((curr_p - buy_price) / buy_price) * 100 if buy_price > 0 else 0
+            total_buy_usd = total_buy
+            total_val_usd = total_val
+            curr_p_usd = curr_p
+            buy_price_usd = buy_price
+            currency_symbol = "₩"
+        
         p_color = "up" if profit >= 0 else "down"
         
         st.markdown(f"<h2 style='font-weight:800; color:white;'>{stock['name']} 자산 리포트</h2>", unsafe_allow_html=True)
-        
-        # 통화 표시
-        if currency == "USD":
-            curr_p_usd = curr_p / exchange_rate
-            buy_price_usd = buy_price / exchange_rate
-            total_buy_usd = total_buy / exchange_rate
-            total_val_usd = total_val / exchange_rate
-            currency_symbol = "$"
-        else:
-            curr_p_usd = curr_p
-            buy_price_usd = buy_price
-            total_buy_usd = total_buy
-            total_val_usd = total_val
-            currency_symbol = "₩"
         
         # 3열 메트릭 레이아웃
         m1, m2, m3 = st.columns(3)
@@ -653,10 +666,11 @@ def run_portfolio_tab(unused_stock_dict):
                 reg_qty = st.number_input("보유수량", min_value=0.0, step=0.01, key="q_gl_ni")
             
             with c4:
-                # 원화 환산 미리보기
+                # 원화 환산 미리보기 (총 투자금 = 단가 × 수량 × 환율)
                 if price_currency == "USD 🇺🇸":
-                    krw_price = float(reg_price_input) * float(exchange_rate)
-                    st.metric("환산 원화", str(f"₩{int(krw_price):,}"))
+                    total_usd = float(reg_price_input) * float(reg_qty)
+                    converted_krw = total_usd * float(exchange_rate)
+                    st.metric("환산 원화 (총액)", str(f"₩{int(converted_krw):,}"))
                 else:
                     st.write(" ")
             
