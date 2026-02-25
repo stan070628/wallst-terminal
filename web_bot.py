@@ -130,14 +130,14 @@ def login_page() -> None:
         unsafe_allow_html=True,
     )
 
-    mode = st.radio("모드 선택", ["로그인", "가입하기"], horizontal=True)
+    mode = st.radio("모드 선택", ["로그인", "가입하기"], horizontal=True, key="login_mode_radio")
 
     if mode == "로그인":
         with st.form("login_form"):
             u_id = st.text_input("ID", placeholder="stan.lee", max_chars=20)
             u_pw = st.text_input("Password", type="password", max_chars=50)
             # ✅ 자동 로그인 체크박스 추가
-            keep_login = st.checkbox("자동 로그인 유지 (30일)")
+            keep_login = st.checkbox("자동 로그인 유지 (30일)", key="keep_login_checkbox")
 
             submitted = st.form_submit_button("접속 (Login)", use_container_width=True)
 
@@ -245,7 +245,7 @@ def main() -> None:
 
         except Exception as e:
             st.error(f"❌ 메뉴 실행 중 오류가 발생했습니다: {str(e)}")
-            if st.button("로그인 페이지로 돌아가기"):
+            if st.button("로그인 페이지로 돌아가기", key="back_to_login_btn"):
                 st.session_state.logged_in = False
                 st.session_state.user_id   = None
                 st.rerun()

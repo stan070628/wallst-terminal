@@ -100,11 +100,11 @@ def run_scanner_tab(unused_stock_dict):
     col_input1, col_input2 = st.columns([2, 1.2])
     
     with col_input1:
-        search_mode = st.radio("📊 분석 시장 선택", ["🇰🇷 국내 주식/ETF", "🌎 글로벌 자산"], horizontal=True, label_visibility="collapsed")
+        search_mode = st.radio("📊 분석 시장 선택", ["🇰🇷 국내 주식/ETF", "🌎 글로벌 자산"], horizontal=True, label_visibility="collapsed", key="scanner_market_mode")
     
     if search_mode == "🇰🇷 국내 주식/ETF":
         # 시장 세부 선택 (KOSPI / KOSDAQ / 전체)
-        kr_market_filter = st.radio("📌 시장 필터", ["전체 (KOSPI+KOSDAQ)", "KOSPI만", "KOSDAQ만"], horizontal=True, label_visibility="collapsed")
+        kr_market_filter = st.radio("📌 시장 필터", ["전체 (KOSPI+KOSDAQ)", "KOSPI만", "KOSDAQ만"], horizontal=True, label_visibility="collapsed", key="scanner_kr_filter")
         
         if kr_market_filter == "KOSPI만":
             market_keys = ["KOSPI"]
@@ -117,7 +117,8 @@ def run_scanner_tab(unused_stock_dict):
         user_input = st.text_input(
             "📌 종목 검색 (부분 입력 가능)", 
             placeholder="예: '삼성' → 삼성전자, 삼성SDI, 삼성화재... | '금' → 금융, 금현물...",
-            help="한글 이름 또는 6자리 코드의 일부만 입력해도 관련 종목이 리스트됩니다"
+            help="한글 이름 또는 6자리 코드의 일부만 입력해도 관련 종목이 리스트됩니다",
+            key="scanner_kr_search"
         ).strip()
         
         target_ticker = None
@@ -135,7 +136,8 @@ def run_scanner_tab(unused_stock_dict):
                 selected_display = st.selectbox(
                     "📊 분석할 종목 선택",
                     options=display_options,
-                    label_visibility="collapsed"
+                    label_visibility="collapsed",
+                    key="scanner_kr_select"
                 )
                 
                 # 선택된 항목의 정보 찾기
@@ -158,7 +160,8 @@ def run_scanner_tab(unused_stock_dict):
             "💱 종목명, 6자리 코드, 또는 코인명",
             value="AAPL",
             placeholder="예: 229200, 비트코인, NVDA",
-            help="암호화폐(비트코인/이더리움/리플), 6자리 한국 코드, 또는 미국 티커"
+            help="암호화폐(비트코인/이더리움/리플), 6자리 한국 코드, 또는 미국 티커",
+            key="scanner_global_search"
         )
 
         # [스마트 티커 분류기]
@@ -219,7 +222,7 @@ def run_scanner_tab(unused_stock_dict):
     
     # 분석 버튼
     col_btn = st.columns([1])[0]
-    btn_analyze = st.button(f"🚀 {target_name} 분석 시작", type="primary", use_container_width=True, help="9대 지표 통합 분석 시작 (5-10초)")
+    btn_analyze = st.button(f"🚀 {target_name} 분석 시작", type="primary", use_container_width=True, help="9대 지표 통합 분석 시작 (5-10초)", key="scanner_analyze_btn")
     
     if btn_analyze:
         # 로딩 애니메이션

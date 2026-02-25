@@ -18,7 +18,7 @@ def run_deepdive_tab(stock_dict):
             key="expert_search_smart"
         )
     with col2:
-        run_btn = st.button(f"⚡ 즉시 분석 개시", use_container_width=True)
+        run_btn = st.button(f"⚡ 즉시 분석 개시", use_container_width=True, key="deepdive_analyze_btn")
         
     st.markdown("---")
     

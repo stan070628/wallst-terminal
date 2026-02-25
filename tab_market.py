@@ -97,8 +97,7 @@ def run_market_tab(unused_stock_dict):
         "시장 타겟",
         ["🇰🇷 KOSPI", "🇰🇷 KOSDAQ", "🌎 GLOBAL", "🔥 전체 통합 스캔 (ALL)"],
         horizontal=True,
-        label_visibility="collapsed",
-    )
+        label_visibility="collapsed",        key="market_scan_radio"    )
 
     # 리미트 슬라이더를 1,000개까지 확장
     st.markdown("### 🎚️ 최대 스캔 개수 (융단 폭격 모드)")
@@ -110,6 +109,7 @@ def run_market_tab(unused_stock_dict):
         step=50,
         label_visibility="collapsed",
         help="1,000개 풀스캔 시 약 30~60초가 소요됩니다. 야후 서버 상태에 따라 튕기는 종목이 발생할 수 있습니다.",
+        key="market_scan_limit"
     )
 
     st.markdown("---")
@@ -119,6 +119,7 @@ def run_market_tab(unused_stock_dict):
         f"🚀 {market_choice} ({scan_limit}개) 융단 폭격 시작",
         type="primary",
         use_container_width=True,
+        key="market_scan_btn"
     ):
         # ── 시장 키 결정 ──
         if "ALL" in market_choice or "전체" in market_choice:
