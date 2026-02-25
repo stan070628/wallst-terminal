@@ -91,10 +91,6 @@ def show_expert_popup(stock):
         st.markdown(f"#### 🚩 **{msg}**")
         if currency == "USD":
             st.caption(f"보유수량: {quantity:,.2f}주 | 총 투자금: ${total_buy_usd:,.2f} (₩{int(total_buy):,})")
-            # 🔧 DEBUG: 전체 계산값 확인용 (문제 해결 후 제거)
-            st.caption(f"🔧 DEBUG1: curr_p={curr_p:.2f}, quantity={quantity}, buy_price={buy_price}")
-            st.caption(f"🔧 DEBUG2: invest_usd={invest_usd:.2f}, eval_usd={eval_usd:.2f}, profit={profit:.2f}%")
-            st.caption(f"🔧 DEBUG3: total_val_usd={total_val_usd:.2f}, exchange_rate={exchange_rate}")
         else:
             st.caption(f"보유수량: {quantity:,}주 | 총 투자금: ₩{int(total_buy):,}")
         
